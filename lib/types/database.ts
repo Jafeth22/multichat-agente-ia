@@ -758,6 +758,95 @@ export interface Database {
           },
         ];
       };
+      integration_configs: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          type: "channel" | "ai_provider" | "email_provider";
+          provider: string;
+          display_name: string | null;
+          vault_secret_name: string | null;
+          oauth_data: Json | null;
+          config: Json | null;
+          is_active: boolean;
+          connected_at: string | null;
+          last_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          type: "channel" | "ai_provider" | "email_provider";
+          provider: string;
+          display_name?: string | null;
+          vault_secret_name?: string | null;
+          oauth_data?: Json | null;
+          config?: Json | null;
+          is_active?: boolean;
+          connected_at?: string | null;
+          last_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          display_name?: string | null;
+          vault_secret_name?: string | null;
+          oauth_data?: Json | null;
+          config?: Json | null;
+          is_active?: boolean;
+          connected_at?: string | null;
+          last_error?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "integration_configs_workspace_id_fkey";
+            columns: ["workspace_id"];
+            isOneToOne: false;
+            referencedRelation: "workspaces";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      email_logs: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          to_email: string;
+          subject: string;
+          template: string | null;
+          status: "sent" | "failed";
+          attempts: number;
+          error: string | null;
+          metadata: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          to_email: string;
+          subject: string;
+          template?: string | null;
+          status: "sent" | "failed";
+          attempts?: number;
+          error?: string | null;
+          metadata?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          [key: string]: never;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_workspace_id_fkey";
+            columns: ["workspace_id"];
+            isOneToOne: false;
+            referencedRelation: "workspaces";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       broadcasts: {
         Row: {
           id: string;
@@ -1154,6 +1243,41 @@ export interface Database {
           b_id: string;
         };
         Returns: undefined;
+      };
+      store_secret: {
+        Args: {
+          p_secret_name: string;
+          p_secret_value: string;
+          p_workspace_id: string;
+        };
+        Returns: string;
+      };
+      read_secret: {
+        Args: {
+          p_secret_name: string;
+          p_workspace_id: string;
+        };
+        Returns: string | null;
+      };
+      read_channel_secret: {
+        Args: {
+          p_secret_name: string;
+          p_workspace_id: string;
+        };
+        Returns: string | null;
+      };
+      delete_secret: {
+        Args: {
+          p_secret_name: string;
+          p_workspace_id: string;
+        };
+        Returns: boolean;
+      };
+      is_workspace_admin: {
+        Args: {
+          ws_id: string;
+        };
+        Returns: boolean;
       };
     };
     Enums: {

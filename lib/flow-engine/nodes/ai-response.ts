@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/types/database";
 import type { FlowExecutionContext, AiResponseNodeData } from "../types";
 import { createZernioClient } from "@/lib/zernio-client";
+import { readChannelSecret } from "@/lib/vault";
 import { generateText, createGateway } from "ai";
 
 // Halt the run: continuing would let a downstream Send Message deliver the
@@ -24,19 +25,20 @@ export async function executeAiResponse(
   context: FlowExecutionContext,
   sessionId: string
 ) {
-  // Get workspace for Zernio API key + AI Gateway key
+  // AI Gateway key (BYOK por proveedor via Vault queda para Fase 2).
   const { data: workspace } = await supabase
     .from("workspaces")
-    .select("late_api_key_encrypted, ai_api_key")
+    .select("ai_api_key")
     .eq("id", context.workspaceId)
     .single();
 
-  if (!workspace?.late_api_key_encrypted) {
+  const apiKey = await readChannelSecret(supabase, "zernio_api_key", context.workspaceId);
+  if (!apiKey) {
     console.error("No Zernio API key for workspace:", context.workspaceId);
     return cancelRun(supabase, sessionId);
   }
 
-  const zernio = createZernioClient(workspace.late_api_key_encrypted);
+  const zernio = createZernioClient(apiKey);
 
   // Resolve late_account_id from channel if not in context
   let lateAccountId = context.lateAccountId;
@@ -99,7 +101,7 @@ export async function executeAiResponse(
 
   try {
     const model = data.model || "openai/gpt-4o-mini";
-    const aiGatewayKey = workspace.ai_api_key || process.env.AI_GATEWAY_API_KEY;
+    const aiGatewayKey = workspace?.ai_api_key || process.env.AI_GATEWAY_API_KEY;
     const gw = createGateway({ apiKey: aiGatewayKey || undefined });
     const result = await generateText({
       model: gw(model),

@@ -2,6 +2,8 @@
 
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getWorkspace } from "@/lib/workspace";
+import { isOwnerOrAdmin } from "@/lib/permissions";
+import { sendEmail } from "@/lib/email/send-email";
 
 export async function inviteTeamMember(
   workspaceId: string,
@@ -22,7 +24,7 @@ export async function inviteTeamMember(
     .eq("user_id", user.id)
     .single();
 
-  if (membership?.role !== "owner" && membership?.role !== "admin") {
+  if (!isOwnerOrAdmin(membership?.role)) {
     return { error: "Solo Owner o Admin pueden invitar miembros" };
   }
 
@@ -73,6 +75,21 @@ export async function inviteTeamMember(
   if (insertError) {
     return { error: insertError.message };
   }
+
+  // Email de invitacion (Resend, F7). Best-effort: si Resend no esta
+  // configurado o falla, la invitacion ya quedo creada igual y se puede
+  // compartir el link a mano; sendEmail ya registra el error en
+  // email_logs y no lanza excepcion.
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "");
+  const inviteUrl = `${appUrl}/invite/${invite.id}`;
+  await sendEmail({
+    supabase,
+    workspaceId: workspace.id,
+    to: trimmedEmail,
+    subject: `Te invitaron a sumarte a ${workspace.name}`,
+    html: `<p>Te invitaron a sumarte al equipo de <strong>${workspace.name}</strong>.</p><p><a href="${inviteUrl}">Aceptar invitacion</a></p><p>Este link vence en 7 dias.</p>`,
+    template: "team_invite",
+  });
 
   return { ok: true, invite };
 }
@@ -136,7 +153,7 @@ export async function changeTeamMemberRole(
     .eq("user_id", user.id)
     .single();
 
-  if (membership?.role !== "owner" && membership?.role !== "admin") {
+  if (!isOwnerOrAdmin(membership?.role)) {
     return { error: "Solo Owner o Admin pueden cambiar roles" };
   }
 
@@ -270,7 +287,7 @@ export async function revokeInvite(inviteId: string) {
     .eq("user_id", user.id)
     .single();
 
-  if (membership?.role !== "owner" && membership?.role !== "admin") {
+  if (!isOwnerOrAdmin(membership?.role)) {
     return { error: "Solo Owner o Admin pueden revocar invitaciones" };
   }
 

@@ -29,6 +29,7 @@ import {
   createWhatsappInstance,
   refreshWhatsappQr,
   disconnectWhatsappInstance,
+  checkWhatsappConnectionState,
 } from "@/lib/actions/whatsapp";
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
@@ -65,6 +66,15 @@ export function ChannelsView({
   workspaceId: string;
 }) {
   const [channels, setChannels] = useState(initialChannels);
+
+  // Cuando se conecta Zernio desde la card de arriba (ZernioCard), el
+  // padre pide un router.refresh() que vuelve a traer los canales desde
+  // el server component. Sin este efecto, este estado local quedaba
+  // pegado en la lista (vacia) del primer render.
+  useEffect(() => {
+    setChannels(initialChannels);
+  }, [initialChannels]);
+
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
@@ -78,24 +88,26 @@ export function ChannelsView({
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
-  // Mientras el modal de QR esta abierto, refresca el canal cada 3s para
-  // detectar cuando Evolution API confirma la conexion (evento
-  // connection.update procesado por el webhook interno).
+  // Mientras el modal de QR esta abierto, cada 3s le pregunta directo a
+  // Evolution API si ya se conecto (ademas de que el webhook interno
+  // puede actualizar el canal solo). El chequeo directo es el que hace
+  // que esto funcione tambien en desarrollo local, donde Evolution API
+  // (en Railway) no le puede avisar a tu localhost.
   useEffect(() => {
     if (!whatsappModalChannel || whatsappModalChannel.connection_status === "connected") {
       return;
     }
-    const supabase = createClient();
+    const channelId = whatsappModalChannel.id;
     const interval = setInterval(async () => {
-      const { data } = await supabase
-        .from("channels")
-        .select("*")
-        .eq("id", whatsappModalChannel.id)
-        .single();
-      if (data) {
-        setChannels((prev) => prev.map((c) => (c.id === data.id ? data : c)));
-        setWhatsappModalChannel(data);
+      const result = await checkWhatsappConnectionState(channelId);
+      if ("error" in result) {
+        console.error("[whatsapp] checkWhatsappConnectionState:", result.error);
+        setWhatsappActionError(result.error);
+        return;
       }
+      const data = result.channel;
+      setChannels((prev) => prev.map((c) => (c.id === data.id ? data : c)));
+      setWhatsappModalChannel((prev) => (prev?.id === data.id ? data : prev));
     }, 3000);
     return () => clearInterval(interval);
   }, [whatsappModalChannel]);
@@ -289,66 +301,64 @@ export function ChannelsView({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="border-b border-border px-8 py-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Channels</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Your connected social media accounts from Zernio
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {syncMessage && (
-              <span className="text-xs text-muted-foreground">
-                {syncMessage}
-              </span>
-            )}
+    <div>
+      {/* Barra de acciones */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Cuentas conectadas via Zernio y WhatsApp
+        </p>
+        <div className="flex items-center gap-3">
+          {syncMessage && (
+            <span className="text-xs text-muted-foreground">
+              {syncMessage}
+            </span>
+          )}
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <RefreshCw
+              className={cn("h-4 w-4", syncing && "animate-spin")}
+            />
+            {syncing ? "Syncing..." : "Sync"}
+          </button>
+          <div className="relative" ref={pickerRef}>
             <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+              onClick={() => setShowPlatformPicker(!showPlatformPicker)}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
             >
-              <RefreshCw
-                className={cn("h-4 w-4", syncing && "animate-spin")}
-              />
-              {syncing ? "Syncing..." : "Sync"}
+              <Plus className="h-4 w-4" />
+              Connect Channel
             </button>
-            <div className="relative" ref={pickerRef}>
-              <button
-                onClick={() => setShowPlatformPicker(!showPlatformPicker)}
-                className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
-              >
-                <Plus className="h-4 w-4" />
-                Connect Channel
-              </button>
-              {showPlatformPicker && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-border bg-card p-2 shadow-lg">
-                  {PLATFORMS.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => handleConnect(p)}
-                      disabled={connecting === p}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
-                    >
-                      {connecting === p ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <PlatformIcon platform={p} className="h-4 w-4" size={16} />
-                      )}
-                      {PLATFORM_LABELS[p]}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {showPlatformPicker && (
+              <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-border bg-card p-2 shadow-lg">
+                {PLATFORMS.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => handleConnect(p)}
+                    disabled={connecting === p}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+                  >
+                    {connecting === p ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <PlatformIcon platform={p} className="h-4 w-4" size={16} />
+                    )}
+                    {PLATFORM_LABELS[p]}
+                    {(p === "facebook" || p === "twitter") && (
+                      <span className="ml-auto text-[10px] text-muted-foreground">$6/mes extra</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Channel cards */}
-      <div className="flex-1 overflow-auto p-8">
+      <div className="pt-4">
         {channels.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20">
             <Plug className="h-10 w-10 text-muted-foreground/40" />

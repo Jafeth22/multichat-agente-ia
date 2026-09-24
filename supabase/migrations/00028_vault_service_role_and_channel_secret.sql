@@ -1,70 +1,33 @@
 -- ============================================================
--- SUPABASE VAULT: almacenamiento cifrado de API keys (F2)
+-- VAULT: acceso del service role + read_channel_secret (Bloque 2)
 -- ============================================================
--- Habilita la extension Vault (cifrado AES-256 para secrets) y agrega
--- 3 funciones RPC para guardar, leer y eliminar secrets aislados por
--- workspace. Solo Owner/Admin del workspace pueden usarlas.
+-- Parche sobre 00018_vault_setup.sql. Supabase CLI controla que
+-- migraciones ya corrieron por nombre de archivo, no por contenido: si
+-- 00018 ya se aplico contra esta base antes de estos cambios, editar
+-- ese archivo no alcanza para que el cambio llegue. Esta migracion
+-- nueva aplica el mismo cambio con create or replace (idempotente),
+-- asi corre bien tanto si 00018 ya se aplico como si no.
 --
--- No hay UI directa de Vault: la UI es la pantalla de integraciones
--- del Bloque 2 (/settings/integrations), que va a llamar a estas
--- funciones via supabase.rpc(...).
+-- Que cambia:
+-- 1. store_secret/read_secret/delete_secret ahora tambien aceptan al
+--    service role (antes solo Owner/Admin autenticado). Lo necesita el
+--    webhook de Evolution API (F7): corre con el service role, sin
+--    auth.uid(), y tiene que poder leer la key de Resend para avisar
+--    por email que WhatsApp se desconecto.
+-- 2. Funcion nueva read_channel_secret: variante mas permisiva de
+--    read_secret para secrets que necesita cualquier Member del
+--    workspace en tiempo de ejecucion (hoy: la key de Zernio, para
+--    mandar/recibir mensajes desde la bandeja, los flows, las
+--    secuencias, los comentarios y los broadcasts). Lista blanca de
+--    nombres a proposito: nunca deja leer las keys de Resend o de IA
+--    (esas siguen siendo solo Owner/Admin, via read_secret).
 -- ============================================================
 
--- El nombre real de la extension en Supabase es "supabase_vault" (no
--- "vault"): ella misma crea y controla el schema "vault", no se elige
--- con WITH SCHEMA. En la mayoria de los proyectos Supabase ya viene
--- habilitada por defecto, por eso el IF NOT EXISTS.
-create extension if not exists supabase_vault;
-
--- Helper: rol owner/admin en el workspace. Se reutiliza en bloques
--- siguientes (integration_configs, audit_log, etc).
-create or replace function is_workspace_admin(ws_id uuid)
-returns boolean as $$
-  select exists (
-    select 1 from workspace_members
-    where workspace_id = ws_id
-      and user_id = auth.uid()
-      and role in ('owner', 'admin')
-  );
-$$ language sql security definer stable;
-
--- Helper: la llamada viene del service role (cron, webhooks), no de un
--- usuario logueado. Bloque 2 lo necesita: el webhook de Evolution API
--- corre con el service role (no hay auth.uid()) y tiene que poder leer
--- la API key de Resend para avisar por email que WhatsApp se desconecto.
 create or replace function is_service_role()
 returns boolean as $$
   select auth.role() = 'service_role';
 $$ language sql security definer stable;
 
--- Mapea un nombre logico de secret (ej: "zernio_api_key") al id real
--- del secret en vault.secrets, por workspace. Esta tabla no se
--- consulta directo desde el cliente: solo la usan las funciones de
--- abajo (security definer), por eso no tiene politicas RLS permisivas.
-create table if not exists workspace_secrets (
-  id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null references workspaces(id) on delete cascade,
-  secret_name text not null,
-  vault_secret_id uuid not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (workspace_id, secret_name)
-);
-
-create index if not exists idx_workspace_secrets_workspace on workspace_secrets(workspace_id);
-
-alter table workspace_secrets enable row level security;
--- A proposito: no se agregan policies. Con RLS habilitada y sin
--- policies, authenticated no puede leer/escribir esta tabla en forma
--- directa (ni siquiera Owner/Admin): el unico camino es via las
--- funciones store_secret/read_secret/delete_secret, que corren como
--- el dueno de la funcion (bypassea RLS) y validan el rol a mano.
-
-grant select, insert, update, delete on workspace_secrets to authenticated;
-
--- ------------------------------------------------------------
--- store_secret: crea o actualiza un secret
--- ------------------------------------------------------------
 create or replace function store_secret(
   p_secret_name text,
   p_secret_value text,
@@ -104,9 +67,6 @@ begin
 end;
 $$;
 
--- ------------------------------------------------------------
--- read_secret: devuelve el valor original, o null si no existe
--- ------------------------------------------------------------
 create or replace function read_secret(
   p_secret_name text,
   p_workspace_id uuid
@@ -139,9 +99,6 @@ begin
 end;
 $$;
 
--- ------------------------------------------------------------
--- delete_secret: borra el secret. Devuelve false si no existia.
--- ------------------------------------------------------------
 create or replace function delete_secret(
   p_secret_name text,
   p_workspace_id uuid
@@ -173,19 +130,6 @@ begin
 end;
 $$;
 
--- ------------------------------------------------------------
--- read_channel_secret: variante de read_secret para secrets que hacen
--- falta en tiempo de ejecucion para cualquier miembro del workspace,
--- no solo Owner/Admin (Bloque 2: la key de Zernio la necesita
--- cualquier Member para enviar/recibir mensajes desde la bandeja, los
--- flows, las secuencias, los comentarios y los broadcasts).
---
--- Whitelist explicita de p_secret_name a proposito: este camino es mas
--- permisivo que read_secret (cualquier miembro, no solo admin), asi
--- que solo puede servir los secrets "operativos" que estan pensados
--- para eso. Si se agrega otro secret de este tipo, hay que sumarlo
--- aca a mano; no es un passthrough generico.
--- ------------------------------------------------------------
 create or replace function read_channel_secret(
   p_secret_name text,
   p_workspace_id uuid
@@ -226,12 +170,10 @@ revoke all on function store_secret(text, text, uuid) from public;
 revoke all on function read_secret(text, uuid) from public;
 revoke all on function delete_secret(text, uuid) from public;
 revoke all on function read_channel_secret(text, uuid) from public;
-revoke all on function is_workspace_admin(uuid) from public;
 revoke all on function is_service_role() from public;
 
 grant execute on function store_secret(text, text, uuid) to authenticated, service_role;
 grant execute on function read_secret(text, uuid) to authenticated, service_role;
 grant execute on function delete_secret(text, uuid) to authenticated, service_role;
 grant execute on function read_channel_secret(text, uuid) to authenticated, service_role;
-grant execute on function is_workspace_admin(uuid) to authenticated, service_role;
 grant execute on function is_service_role() to authenticated, service_role;

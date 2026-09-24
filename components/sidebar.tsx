@@ -20,6 +20,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { isOwnerOrAdmin } from "@/lib/permissions";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { NotificationsBell } from "@/components/notifications-bell";
 import type { Database } from "@/lib/types/database";
@@ -47,8 +48,9 @@ const navigation = [
   { name: "Sequences", href: "/dashboard/sequences", icon: ListOrdered },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Growth", href: "/dashboard/growth", icon: Sprout },
-  // Solo Owner/Admin gestionan canales y configuracion del workspace (F3).
-  { name: "Channels", href: "/dashboard/channels", icon: Plug, adminOnly: true },
+  // Solo Owner/Admin gestionan integraciones y configuracion del workspace (F3).
+  // Canales (Instagram, WhatsApp) vive dentro de Integraciones desde el Bloque 2.
+  { name: "Integrations", href: "/dashboard/settings/integrations", icon: Plug, adminOnly: true },
   { name: "Settings", href: "/dashboard/settings", icon: Settings, adminOnly: true },
 ];
 
@@ -64,9 +66,9 @@ export function Sidebar({
   role: string;
   notifications?: { id: string; title: string; message: string; created_at: string }[];
 }) {
-  const isOwnerOrAdmin = role === "owner" || role === "admin";
+  const isAdmin = isOwnerOrAdmin(role);
   const visibleNavigation = navigation.filter(
-    (item) => !item.adminOnly || isOwnerOrAdmin
+    (item) => !item.adminOnly || isAdmin
   );
   const pathname = usePathname();
   const router = useRouter();
@@ -117,7 +119,7 @@ export function Sidebar({
       </nav>
 
       <div className="border-t border-sidebar-border p-3 space-y-1">
-        {isOwnerOrAdmin && (
+        {isAdmin && (
           <NotificationsBell workspaceId={workspace.id} notifications={notifications} />
         )}
         <button

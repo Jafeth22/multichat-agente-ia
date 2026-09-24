@@ -1,10 +1,3 @@
--- =============================================
--- ZERNFLOW - COMBINED MIGRATIONS
--- Generated from supabase/migrations/*.sql, in order.
--- Paste this entire file into Supabase SQL Editor
--- https://supabase.com/dashboard/project/_/sql/new
--- =============================================
-
 -- ============================================================
 -- MIGRATION 1: INITIAL SCHEMA
 -- ============================================================
@@ -1087,6 +1080,15 @@ returns boolean as $$
   );
 $$ language sql security definer stable;
 
+-- Helper: la llamada viene del service role (cron, webhooks), no de un
+-- usuario logueado. Bloque 2 lo necesita: el webhook de Evolution API
+-- corre con el service role (no hay auth.uid()) y tiene que poder leer
+-- la API key de Resend para avisar por email que WhatsApp se desconecto.
+create or replace function is_service_role()
+returns boolean as $$
+  select auth.role() = 'service_role';
+$$ language sql security definer stable;
+
 -- Mapea un nombre logico de secret (ej: "zernio_api_key") al id real
 -- del secret en vault.secrets, por workspace. Esta tabla no se
 -- consulta directo desde el cliente: solo la usan las funciones de
@@ -1127,7 +1129,7 @@ as $$
 declare
   v_vault_id uuid;
 begin
-  if not is_workspace_admin(p_workspace_id) then
+  if not is_workspace_admin(p_workspace_id) and not is_service_role() then
     raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
   end if;
 
@@ -1169,7 +1171,7 @@ declare
   v_vault_id uuid;
   v_value text;
 begin
-  if not is_workspace_admin(p_workspace_id) then
+  if not is_workspace_admin(p_workspace_id) and not is_service_role() then
     raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
   end if;
 
@@ -1203,7 +1205,7 @@ as $$
 declare
   v_vault_id uuid;
 begin
-  if not is_workspace_admin(p_workspace_id) then
+  if not is_workspace_admin(p_workspace_id) and not is_service_role() then
     raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
   end if;
 
@@ -1223,15 +1225,68 @@ begin
 end;
 $$;
 
+-- ------------------------------------------------------------
+-- read_channel_secret: variante de read_secret para secrets que hacen
+-- falta en tiempo de ejecucion para cualquier miembro del workspace,
+-- no solo Owner/Admin (Bloque 2: la key de Zernio la necesita
+-- cualquier Member para enviar/recibir mensajes desde la bandeja, los
+-- flows, las secuencias, los comentarios y los broadcasts).
+--
+-- Whitelist explicita de p_secret_name a proposito: este camino es mas
+-- permisivo que read_secret (cualquier miembro, no solo admin), asi
+-- que solo puede servir los secrets "operativos" que estan pensados
+-- para eso. Si se agrega otro secret de este tipo, hay que sumarlo
+-- aca a mano; no es un passthrough generico.
+-- ------------------------------------------------------------
+create or replace function read_channel_secret(
+  p_secret_name text,
+  p_workspace_id uuid
+)
+returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+  v_value text;
+begin
+  if p_secret_name <> 'zernio_api_key' then
+    raise exception 'read_channel_secret no puede leer "%"', p_secret_name;
+  end if;
+
+  if not is_workspace_member(p_workspace_id) and not is_service_role() then
+    raise exception 'No autorizado: se requiere ser miembro del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is null then
+    return null;
+  end if;
+
+  select decrypted_secret into v_value
+  from vault.decrypted_secrets
+  where id = v_vault_id;
+
+  return v_value;
+end;
+$$;
+
 revoke all on function store_secret(text, text, uuid) from public;
 revoke all on function read_secret(text, uuid) from public;
 revoke all on function delete_secret(text, uuid) from public;
+revoke all on function read_channel_secret(text, uuid) from public;
 revoke all on function is_workspace_admin(uuid) from public;
+revoke all on function is_service_role() from public;
 
-grant execute on function store_secret(text, text, uuid) to authenticated;
-grant execute on function read_secret(text, uuid) to authenticated;
-grant execute on function delete_secret(text, uuid) to authenticated;
-grant execute on function is_workspace_admin(uuid) to authenticated;
+grant execute on function store_secret(text, text, uuid) to authenticated, service_role;
+grant execute on function read_secret(text, uuid) to authenticated, service_role;
+grant execute on function delete_secret(text, uuid) to authenticated, service_role;
+grant execute on function read_channel_secret(text, uuid) to authenticated, service_role;
+grant execute on function is_workspace_admin(uuid) to authenticated, service_role;
+grant execute on function is_service_role() to authenticated, service_role;
 
 -- ============================================================
 -- MIGRATION 19: CONTACTS SETTER VENDEDOR
@@ -1615,3 +1670,304 @@ create policy "Owner and admin can update their workspace"
   using (is_workspace_admin(id))
   with check (is_workspace_admin(id));
 
+-- ============================================================
+-- MIGRATION 26: INTEGRATION CONFIGS
+-- ============================================================
+-- ============================================================
+-- INTEGRATION CONFIGS: tabla generica de integraciones (F8)
+-- ============================================================
+-- Un registro por integracion (canal, proveedor de IA o de email) del
+-- workspace. El secret real vive en Vault (workspace_secrets +
+-- vault.secrets, ver 00018); esta tabla solo guarda el nombre logico
+-- del secret y metadata no sensible (estado, config, ultimo error).
+-- Generica a proposito: agregar una integracion nueva (ej: LinkedIn en
+-- Etapa 2) no requiere cambiar esta tabla, solo insertar una fila con
+-- un "provider" nuevo.
+-- ============================================================
+
+create table if not exists integration_configs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  type text not null check (type in ('channel', 'ai_provider', 'email_provider')),
+  provider text not null,
+  display_name text,
+  vault_secret_name text,
+  oauth_data jsonb,
+  config jsonb,
+  is_active boolean not null default false,
+  connected_at timestamptz,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (workspace_id, provider)
+);
+
+create index if not exists idx_integration_configs_workspace on integration_configs(workspace_id);
+create index if not exists idx_integration_configs_workspace_type on integration_configs(workspace_id, type);
+
+drop trigger if exists set_updated_at on integration_configs;
+create trigger set_updated_at
+  before update on integration_configs
+  for each row execute function update_updated_at();
+
+alter table integration_configs enable row level security;
+
+-- Solo Owner/Admin ven y gestionan integraciones (F8, 13b). Un Member no
+-- deberia ni enterarse de que existen estas filas.
+drop policy if exists "Owner and admin can view integrations" on integration_configs;
+create policy "Owner and admin can view integrations"
+  on integration_configs for select
+  using (is_workspace_admin(workspace_id));
+
+drop policy if exists "Owner and admin can insert integrations" on integration_configs;
+create policy "Owner and admin can insert integrations"
+  on integration_configs for insert
+  with check (is_workspace_admin(workspace_id));
+
+drop policy if exists "Owner and admin can update integrations" on integration_configs;
+create policy "Owner and admin can update integrations"
+  on integration_configs for update
+  using (is_workspace_admin(workspace_id))
+  with check (is_workspace_admin(workspace_id));
+
+drop policy if exists "Owner and admin can delete integrations" on integration_configs;
+create policy "Owner and admin can delete integrations"
+  on integration_configs for delete
+  using (is_workspace_admin(workspace_id));
+
+grant select, insert, update, delete on integration_configs to authenticated;
+
+-- Nota para el Bloque 3: cuando exista audit_log, cada conexion/
+-- desconexion/error de una integracion (insert o update de is_active
+-- en esta tabla) deberia quedar registrada ahi (evento "channel_*" o
+-- "integration_*", entity_type = 'integration_configs').
+
+-- ============================================================
+-- MIGRATION 27: EMAIL LOGS
+-- ============================================================
+-- ============================================================
+-- EMAIL LOGS: registro de emails enviados por Resend (F7)
+-- ============================================================
+-- Un registro por intento final de envio (con la cantidad de intentos
+-- que hicieron falta). No guarda el cuerpo del email, solo lo
+-- necesario para diagnosticar fallos y para el historial.
+-- Queda lista para que Fase 2 la reutilice con las secuencias.
+-- ============================================================
+
+create table if not exists email_logs (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  to_email text not null,
+  subject text not null,
+  template text,
+  status text not null check (status in ('sent', 'failed')),
+  attempts integer not null default 1,
+  error text,
+  metadata jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_email_logs_workspace on email_logs(workspace_id);
+create index if not exists idx_email_logs_workspace_created on email_logs(workspace_id, created_at desc);
+
+alter table email_logs enable row level security;
+
+-- Solo Owner/Admin ven el historial de envios (mismo criterio que
+-- integration_configs). El service role (webhooks, cron) inserta sin
+-- pasar por RLS.
+drop policy if exists "Owner and admin can view email logs" on email_logs;
+create policy "Owner and admin can view email logs"
+  on email_logs for select
+  using (is_workspace_admin(workspace_id));
+
+drop policy if exists "Owner and admin can insert email logs" on email_logs;
+create policy "Owner and admin can insert email logs"
+  on email_logs for insert
+  with check (is_workspace_admin(workspace_id));
+
+-- Nunca se edita ni se borra un log de envio: sin policies de
+-- update/delete para authenticated.
+grant select, insert on email_logs to authenticated;
+
+-- ============================================================
+-- MIGRATION 28: VAULT SERVICE ROLE AND CHANNEL SECRET
+-- ============================================================
+-- ============================================================
+-- VAULT: acceso del service role + read_channel_secret (Bloque 2)
+-- ============================================================
+-- Parche sobre 00018_vault_setup.sql. Supabase CLI controla que
+-- migraciones ya corrieron por nombre de archivo, no por contenido: si
+-- 00018 ya se aplico contra esta base antes de estos cambios, editar
+-- ese archivo no alcanza para que el cambio llegue. Esta migracion
+-- nueva aplica el mismo cambio con create or replace (idempotente),
+-- asi corre bien tanto si 00018 ya se aplico como si no.
+--
+-- Que cambia:
+-- 1. store_secret/read_secret/delete_secret ahora tambien aceptan al
+--    service role (antes solo Owner/Admin autenticado). Lo necesita el
+--    webhook de Evolution API (F7): corre con el service role, sin
+--    auth.uid(), y tiene que poder leer la key de Resend para avisar
+--    por email que WhatsApp se desconecto.
+-- 2. Funcion nueva read_channel_secret: variante mas permisiva de
+--    read_secret para secrets que necesita cualquier Member del
+--    workspace en tiempo de ejecucion (hoy: la key de Zernio, para
+--    mandar/recibir mensajes desde la bandeja, los flows, las
+--    secuencias, los comentarios y los broadcasts). Lista blanca de
+--    nombres a proposito: nunca deja leer las keys de Resend o de IA
+--    (esas siguen siendo solo Owner/Admin, via read_secret).
+-- ============================================================
+
+create or replace function is_service_role()
+returns boolean as $$
+  select auth.role() = 'service_role';
+$$ language sql security definer stable;
+
+create or replace function store_secret(
+  p_secret_name text,
+  p_secret_value text,
+  p_workspace_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+begin
+  if not is_workspace_admin(p_workspace_id) and not is_service_role() then
+    raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is not null then
+    perform vault.update_secret(v_vault_id, p_secret_value);
+    update workspace_secrets
+      set updated_at = now()
+      where workspace_id = p_workspace_id and secret_name = p_secret_name;
+  else
+    v_vault_id := vault.create_secret(
+      p_secret_value,
+      p_workspace_id::text || ':' || p_secret_name,
+      'Secret de integracion, workspace ' || p_workspace_id::text
+    );
+    insert into workspace_secrets (workspace_id, secret_name, vault_secret_id)
+    values (p_workspace_id, p_secret_name, v_vault_id);
+  end if;
+
+  return v_vault_id;
+end;
+$$;
+
+create or replace function read_secret(
+  p_secret_name text,
+  p_workspace_id uuid
+)
+returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+  v_value text;
+begin
+  if not is_workspace_admin(p_workspace_id) and not is_service_role() then
+    raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is null then
+    return null;
+  end if;
+
+  select decrypted_secret into v_value
+  from vault.decrypted_secrets
+  where id = v_vault_id;
+
+  return v_value;
+end;
+$$;
+
+create or replace function delete_secret(
+  p_secret_name text,
+  p_workspace_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+begin
+  if not is_workspace_admin(p_workspace_id) and not is_service_role() then
+    raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is null then
+    return false;
+  end if;
+
+  delete from vault.secrets where id = v_vault_id;
+  delete from workspace_secrets
+    where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  return true;
+end;
+$$;
+
+create or replace function read_channel_secret(
+  p_secret_name text,
+  p_workspace_id uuid
+)
+returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+  v_value text;
+begin
+  if p_secret_name <> 'zernio_api_key' then
+    raise exception 'read_channel_secret no puede leer "%"', p_secret_name;
+  end if;
+
+  if not is_workspace_member(p_workspace_id) and not is_service_role() then
+    raise exception 'No autorizado: se requiere ser miembro del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is null then
+    return null;
+  end if;
+
+  select decrypted_secret into v_value
+  from vault.decrypted_secrets
+  where id = v_vault_id;
+
+  return v_value;
+end;
+$$;
+
+revoke all on function store_secret(text, text, uuid) from public;
+revoke all on function read_secret(text, uuid) from public;
+revoke all on function delete_secret(text, uuid) from public;
+revoke all on function read_channel_secret(text, uuid) from public;
+revoke all on function is_service_role() from public;
+
+grant execute on function store_secret(text, text, uuid) to authenticated, service_role;
+grant execute on function read_secret(text, uuid) to authenticated, service_role;
+grant execute on function delete_secret(text, uuid) to authenticated, service_role;
+grant execute on function read_channel_secret(text, uuid) to authenticated, service_role;
+grant execute on function is_service_role() to authenticated, service_role;

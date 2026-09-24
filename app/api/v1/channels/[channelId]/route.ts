@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createZernioClient } from "@/lib/zernio-client";
+import { readChannelSecret } from "@/lib/vault";
 import * as evolution from "@/lib/evolution-client";
 
 async function getWorkspace(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -59,25 +60,28 @@ export async function DELETE(
         );
       }
     }
-  } else if (workspace.late_api_key_encrypted) {
-    const zernio = createZernioClient(workspace.late_api_key_encrypted);
-    try {
-      const res = await zernio.accounts.deleteAccount({
-        path: { accountId: channel.late_account_id },
-      });
-      // A 404 means the account is already gone from Zernio; that's fine.
-      if (res.error && res.response?.status !== 404) {
+  } else {
+    const apiKey = await readChannelSecret(supabase, "zernio_api_key", workspace.id);
+    if (apiKey) {
+      const zernio = createZernioClient(apiKey);
+      try {
+        const res = await zernio.accounts.deleteAccount({
+          path: { accountId: channel.late_account_id },
+        });
+        // A 404 means the account is already gone from Zernio; that's fine.
+        if (res.error && res.response?.status !== 404) {
+          return NextResponse.json(
+            { error: `Failed to disconnect on Zernio: ${JSON.stringify(res.error)}` },
+            { status: 502 }
+          );
+        }
+      } catch (error) {
+        console.error("Failed to disconnect Zernio account:", error);
         return NextResponse.json(
-          { error: `Failed to disconnect on Zernio: ${JSON.stringify(res.error)}` },
+          { error: `Failed to disconnect on Zernio: ${error instanceof Error ? error.message : String(error)}` },
           { status: 502 }
         );
       }
-    } catch (error) {
-      console.error("Failed to disconnect Zernio account:", error);
-      return NextResponse.json(
-        { error: `Failed to disconnect on Zernio: ${error instanceof Error ? error.message : String(error)}` },
-        { status: 502 }
-      );
     }
   }
 

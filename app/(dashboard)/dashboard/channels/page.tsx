@@ -1,19 +1,10 @@
-import { requireWorkspaceAdmin } from "@/lib/workspace";
-import { ChannelsView } from "./channels-view";
+import { redirect } from "next/navigation";
 
-export default async function ChannelsPage() {
-  const { workspace, supabase } = await requireWorkspaceAdmin();
-
-  const { data: channels } = await supabase
-    .from("channels")
-    .select("*")
-    .eq("workspace_id", workspace.id)
-    .order("created_at", { ascending: false });
-
-  return (
-    <ChannelsView
-      channels={channels ?? []}
-      workspaceId={workspace.id}
-    />
-  );
+/**
+ * Canales (Instagram, WhatsApp) se mudo a la seccion "Canales" de
+ * /dashboard/settings/integrations (Bloque 2, F8). Se mantiene este
+ * redirect para no romper links guardados o bookmarks viejos.
+ */
+export default function ChannelsPage() {
+  redirect("/dashboard/settings/integrations");
 }

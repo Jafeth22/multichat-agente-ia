@@ -2,6 +2,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { isOwnerOrAdmin } from "@/lib/permissions";
 
 export const WORKSPACE_COOKIE = "zernflow_workspace_id";
 
@@ -66,7 +67,7 @@ export const getWorkspace = cache(async () => {
 export async function requireWorkspaceAdmin() {
   const result = await getWorkspace();
 
-  if (result.role !== "owner" && result.role !== "admin") {
+  if (!isOwnerOrAdmin(result.role)) {
     redirect("/dashboard");
   }
 

@@ -17,7 +17,7 @@ export default function ChannelCallbackPage() {
       if (!connected) {
         setStatus("error");
         setMessage("Connection was cancelled or failed.");
-        setTimeout(() => router.push("/dashboard/channels"), 2000);
+        setTimeout(() => router.push("/dashboard/settings/integrations"), 2000);
         return;
       }
 
@@ -28,7 +28,7 @@ export default function ChannelCallbackPage() {
         if (!res.ok || data.error) {
           setStatus("error");
           setMessage(data.error || "Failed to sync channels.");
-          setTimeout(() => router.push("/dashboard/channels"), 2000);
+          setTimeout(() => router.push("/dashboard/settings/integrations"), 2000);
           return;
         }
 
@@ -39,11 +39,11 @@ export default function ChannelCallbackPage() {
             ? `${connected} account connected successfully!`
             : "Account connected! Channel is already synced."
         );
-        setTimeout(() => router.push("/dashboard/channels"), 1500);
+        setTimeout(() => router.push("/dashboard/settings/integrations"), 1500);
       } catch {
         setStatus("error");
         setMessage("Failed to sync. You can try syncing manually.");
-        setTimeout(() => router.push("/dashboard/channels"), 2000);
+        setTimeout(() => router.push("/dashboard/settings/integrations"), 2000);
       }
     }
 
@@ -63,7 +63,7 @@ export default function ChannelCallbackPage() {
           <XCircle className="h-8 w-8 text-red-500" />
         )}
         <p className="text-sm font-medium text-foreground">{message}</p>
-        <p className="text-xs text-muted-foreground">Redirecting to channels...</p>
+        <p className="text-xs text-muted-foreground">Redirecting to integrations...</p>
       </div>
     </div>
   );

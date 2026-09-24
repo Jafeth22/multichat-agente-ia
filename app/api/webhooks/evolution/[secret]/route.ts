@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { upsertContactForSender } from "@/lib/inbox-sync";
 import { messagePreview } from "@/lib/message-preview";
+import { sendEmail } from "@/lib/email/send-email";
 
 /**
  * POST /api/webhooks/evolution/[secret]
@@ -138,7 +139,7 @@ async function handleConnectionUpdate(
         workspace_id: channel.workspace_id,
         type: "channel_disconnected",
         title: "WhatsApp se desconecto",
-        message: `El canal "${channel.display_name ?? "WhatsApp"}" se desconecto. Reconectalo desde Canales escaneando el QR de nuevo.`,
+        message: `El canal "${channel.display_name ?? "WhatsApp"}" se desconecto. Reconectalo desde Integraciones escaneando el QR de nuevo.`,
         channel_id: channel.id,
       });
 
@@ -146,6 +147,10 @@ async function handleConnectionUpdate(
         .from("channels")
         .update({ disconnected_notified_at: new Date().toISOString() })
         .eq("id", channel.id);
+
+      // Aviso por email a Owner/Admin (F7), ademas de la campanita in-app.
+      // Best-effort: sendEmail nunca lanza, ya registra el error si falla.
+      await notifyAdminsByEmail(supabase, channel);
     }
     return;
   }
@@ -156,6 +161,32 @@ async function handleConnectionUpdate(
       .from("channels")
       .update({ connection_status: "connecting" })
       .eq("id", channel.id);
+  }
+}
+
+async function notifyAdminsByEmail(
+  supabase: Awaited<ReturnType<typeof createServiceClient>>,
+  channel: { id: string; workspace_id: string; display_name: string | null }
+) {
+  const { data: admins } = await supabase
+    .from("workspace_members")
+    .select("user_id")
+    .eq("workspace_id", channel.workspace_id)
+    .in("role", ["owner", "admin"]);
+
+  for (const admin of admins ?? []) {
+    const { data } = await supabase.auth.admin.getUserById(admin.user_id);
+    const email = data.user?.email;
+    if (!email) continue;
+
+    await sendEmail({
+      supabase,
+      workspaceId: channel.workspace_id,
+      to: email,
+      subject: "WhatsApp se desconecto",
+      html: `<p>El canal "${channel.display_name ?? "WhatsApp"}" se desconecto.</p><p>Reconectalo desde <strong>Integraciones</strong> escaneando el QR de nuevo.</p>`,
+      template: "whatsapp_disconnected",
+    });
   }
 }
 

@@ -2,7 +2,11 @@
 
 import { randomUUID, randomBytes } from "node:crypto";
 import { getWorkspace } from "@/lib/workspace";
+import { isOwnerOrAdmin } from "@/lib/permissions";
 import * as evolution from "@/lib/evolution-client";
+import type { Database } from "@/lib/types/database";
+
+type Channel = Database["public"]["Tables"]["channels"]["Row"];
 
 /**
  * Evolution API corre en Railway pero la app se despliega en Vercel, asi
@@ -18,7 +22,7 @@ function webhookUrl(secret: string): string {
 
 async function requireAdmin() {
   const ctx = await getWorkspace();
-  if (ctx.role !== "owner" && ctx.role !== "admin") {
+  if (!isOwnerOrAdmin(ctx.role)) {
     throw new Error("Solo Owner o Admin pueden gestionar canales");
   }
   return ctx;
@@ -98,6 +102,63 @@ export async function refreshWhatsappQr(channelId: string) {
       error: err instanceof Error ? err.message : "No se pudo generar el QR",
     };
   }
+}
+
+/**
+ * Consulta el estado real de la instancia directo en Evolution API, en
+ * vez de esperar el webhook. Sirve de respaldo para cuando el webhook
+ * no puede llegar (por ejemplo, en desarrollo local: Evolution API
+ * corre en Railway y no puede avisarle a tu localhost) y como refuerzo
+ * en produccion por si algun aviso de Evolution se pierde. Si detecta
+ * que ya esta conectada, actualiza el canal igual que lo hace el
+ * webhook.
+ */
+export async function checkWhatsappConnectionState(
+  channelId: string
+): Promise<{ ok: true; channel: Channel } | { error: string }> {
+  const { workspace, supabase } = await requireAdmin();
+
+  const { data: channel } = await supabase
+    .from("channels")
+    .select("*")
+    .eq("id", channelId)
+    .eq("workspace_id", workspace.id)
+    .eq("platform", "whatsapp")
+    .single();
+
+  if (!channel?.evolution_instance_name) {
+    return { error: "Canal de WhatsApp no encontrado" };
+  }
+
+  if (channel.connection_status === "connected") {
+    return { ok: true, channel };
+  }
+
+  try {
+    const state = await evolution.getConnectionState(channel.evolution_instance_name);
+    if (state.instance?.state !== "open") {
+      return { ok: true, channel };
+    }
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : "No se pudo consultar el estado en Evolution API",
+    };
+  }
+
+  const { data: updated } = await supabase
+    .from("channels")
+    .update({
+      connection_status: "connected",
+      qr_code: null,
+      last_connected_at: new Date().toISOString(),
+      disconnected_at: null,
+      disconnected_notified_at: null,
+    })
+    .eq("id", channelId)
+    .select("*")
+    .single();
+
+  return { ok: true, channel: updated ?? channel };
 }
 
 /** Desconecta manualmente (logout), la instancia queda lista para reconectar. */
