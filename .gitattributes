@@ -1,0 +1,17 @@
+# Normaliza los finales de linea a LF (Unix) dentro del repositorio,
+# sin importar el sistema operativo desde el que se edite o clone.
+# Evita que Windows (CRLF) y Linux/Mac (LF) muestren cambios falsos
+# y mantiene consistencia con el deploy en Railway (Linux).
+* text=auto eol=lf
+
+# Binarios: nunca tocar sus bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

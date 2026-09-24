@@ -1054,3 +1054,564 @@ alter default privileges in schema public
 alter default privileges in schema public
   grant usage, select on sequences to anon, authenticated;
 
+-- ============================================================
+-- MIGRATION 18: VAULT SETUP
+-- ============================================================
+-- ============================================================
+-- SUPABASE VAULT: almacenamiento cifrado de API keys (F2)
+-- ============================================================
+-- Habilita la extension Vault (cifrado AES-256 para secrets) y agrega
+-- 3 funciones RPC para guardar, leer y eliminar secrets aislados por
+-- workspace. Solo Owner/Admin del workspace pueden usarlas.
+--
+-- No hay UI directa de Vault: la UI es la pantalla de integraciones
+-- del Bloque 2 (/settings/integrations), que va a llamar a estas
+-- funciones via supabase.rpc(...).
+-- ============================================================
+
+-- El nombre real de la extension en Supabase es "supabase_vault" (no
+-- "vault"): ella misma crea y controla el schema "vault", no se elige
+-- con WITH SCHEMA. En la mayoria de los proyectos Supabase ya viene
+-- habilitada por defecto, por eso el IF NOT EXISTS.
+create extension if not exists supabase_vault;
+
+-- Helper: rol owner/admin en el workspace. Se reutiliza en bloques
+-- siguientes (integration_configs, audit_log, etc).
+create or replace function is_workspace_admin(ws_id uuid)
+returns boolean as $$
+  select exists (
+    select 1 from workspace_members
+    where workspace_id = ws_id
+      and user_id = auth.uid()
+      and role in ('owner', 'admin')
+  );
+$$ language sql security definer stable;
+
+-- Mapea un nombre logico de secret (ej: "zernio_api_key") al id real
+-- del secret en vault.secrets, por workspace. Esta tabla no se
+-- consulta directo desde el cliente: solo la usan las funciones de
+-- abajo (security definer), por eso no tiene politicas RLS permisivas.
+create table if not exists workspace_secrets (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  secret_name text not null,
+  vault_secret_id uuid not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (workspace_id, secret_name)
+);
+
+create index if not exists idx_workspace_secrets_workspace on workspace_secrets(workspace_id);
+
+alter table workspace_secrets enable row level security;
+-- A proposito: no se agregan policies. Con RLS habilitada y sin
+-- policies, authenticated no puede leer/escribir esta tabla en forma
+-- directa (ni siquiera Owner/Admin): el unico camino es via las
+-- funciones store_secret/read_secret/delete_secret, que corren como
+-- el dueno de la funcion (bypassea RLS) y validan el rol a mano.
+
+grant select, insert, update, delete on workspace_secrets to authenticated;
+
+-- ------------------------------------------------------------
+-- store_secret: crea o actualiza un secret
+-- ------------------------------------------------------------
+create or replace function store_secret(
+  p_secret_name text,
+  p_secret_value text,
+  p_workspace_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+begin
+  if not is_workspace_admin(p_workspace_id) then
+    raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is not null then
+    perform vault.update_secret(v_vault_id, p_secret_value);
+    update workspace_secrets
+      set updated_at = now()
+      where workspace_id = p_workspace_id and secret_name = p_secret_name;
+  else
+    v_vault_id := vault.create_secret(
+      p_secret_value,
+      p_workspace_id::text || ':' || p_secret_name,
+      'Secret de integracion, workspace ' || p_workspace_id::text
+    );
+    insert into workspace_secrets (workspace_id, secret_name, vault_secret_id)
+    values (p_workspace_id, p_secret_name, v_vault_id);
+  end if;
+
+  return v_vault_id;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- read_secret: devuelve el valor original, o null si no existe
+-- ------------------------------------------------------------
+create or replace function read_secret(
+  p_secret_name text,
+  p_workspace_id uuid
+)
+returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+  v_value text;
+begin
+  if not is_workspace_admin(p_workspace_id) then
+    raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is null then
+    return null;
+  end if;
+
+  select decrypted_secret into v_value
+  from vault.decrypted_secrets
+  where id = v_vault_id;
+
+  return v_value;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- delete_secret: borra el secret. Devuelve false si no existia.
+-- ------------------------------------------------------------
+create or replace function delete_secret(
+  p_secret_name text,
+  p_workspace_id uuid
+)
+returns boolean
+language plpgsql
+security definer
+as $$
+declare
+  v_vault_id uuid;
+begin
+  if not is_workspace_admin(p_workspace_id) then
+    raise exception 'No autorizado: se requiere rol Owner o Admin del workspace';
+  end if;
+
+  select vault_secret_id into v_vault_id
+  from workspace_secrets
+  where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  if v_vault_id is null then
+    return false;
+  end if;
+
+  delete from vault.secrets where id = v_vault_id;
+  delete from workspace_secrets
+    where workspace_id = p_workspace_id and secret_name = p_secret_name;
+
+  return true;
+end;
+$$;
+
+revoke all on function store_secret(text, text, uuid) from public;
+revoke all on function read_secret(text, uuid) from public;
+revoke all on function delete_secret(text, uuid) from public;
+revoke all on function is_workspace_admin(uuid) from public;
+
+grant execute on function store_secret(text, text, uuid) to authenticated;
+grant execute on function read_secret(text, uuid) to authenticated;
+grant execute on function delete_secret(text, uuid) to authenticated;
+grant execute on function is_workspace_admin(uuid) to authenticated;
+
+-- ============================================================
+-- MIGRATION 19: CONTACTS SETTER VENDEDOR
+-- ============================================================
+-- ============================================================
+-- CONTACTS: setter_id y vendedor_id, adelantados desde el Bloque 3 (F9/F11)
+-- ============================================================
+-- El scope de leads por RLS (Bloque 1, F3) tiene que poder filtrar por
+-- "es setter, vendedor o asignado". Para eso hacen falta estas dos
+-- columnas ahora. El resto del modelo de contacto extendido (telefono,
+-- redes, atribucion, etc.) se agrega recien en el Bloque 3.
+-- ============================================================
+
+alter table contacts
+  add column if not exists setter_id uuid references auth.users(id) on delete set null,
+  add column if not exists vendedor_id uuid references auth.users(id) on delete set null;
+
+create index if not exists idx_contacts_setter on contacts(setter_id);
+create index if not exists idx_contacts_vendedor on contacts(vendedor_id);
+
+-- ============================================================
+-- MIGRATION 20: LEADS SCOPE RLS
+-- ============================================================
+-- ============================================================
+-- SCOPE DE LEADS POR RLS (F3)
+-- ============================================================
+-- Un Member solo ve/edita los contactos y conversaciones donde es
+-- setter, vendedor o (en conversaciones) el asignado. Owner y Admin
+-- ven todo. Para los leads sin asignar, el workspace decide si los ve
+-- cualquier Member o solo Owner/Admin (default: solo Owner/Admin).
+-- Se aplica en la base de datos (RLS), no solo en la UI.
+-- ============================================================
+
+-- Valida que workspace_members.role sea siempre uno de los 3 roles
+-- que soporta el sistema (antes no habia ningun constraint).
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'workspace_members_role_check'
+  ) then
+    alter table workspace_members
+      add constraint workspace_members_role_check check (role in ('owner', 'admin', 'member'));
+  end if;
+end $$;
+
+-- Config del workspace: quien ve los leads sin asignar.
+alter table workspaces
+  add column if not exists unassigned_leads_visible_to text not null default 'owner_admin';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'workspaces_unassigned_leads_visible_to_check'
+  ) then
+    alter table workspaces
+      add constraint workspaces_unassigned_leads_visible_to_check
+      check (unassigned_leads_visible_to in ('owner_admin', 'everyone'));
+  end if;
+end $$;
+
+-- ------------------------------------------------------------
+-- can_see_contact: helper de scope para la tabla contacts
+-- ------------------------------------------------------------
+create or replace function can_see_contact(p_contact_id uuid)
+returns boolean
+language plpgsql
+security definer
+stable
+as $$
+declare
+  v_workspace_id uuid;
+  v_setter_id uuid;
+  v_vendedor_id uuid;
+  v_visibility text;
+begin
+  select workspace_id, setter_id, vendedor_id
+    into v_workspace_id, v_setter_id, v_vendedor_id
+  from contacts
+  where id = p_contact_id;
+
+  if v_workspace_id is null or not is_workspace_member(v_workspace_id) then
+    return false;
+  end if;
+
+  if is_workspace_admin(v_workspace_id) then
+    return true;
+  end if;
+
+  if v_setter_id = auth.uid() or v_vendedor_id = auth.uid() then
+    return true;
+  end if;
+
+  if v_setter_id is null and v_vendedor_id is null then
+    select unassigned_leads_visible_to into v_visibility
+    from workspaces where id = v_workspace_id;
+
+    if v_visibility = 'everyone' then
+      return true;
+    end if;
+  end if;
+
+  return false;
+end;
+$$;
+
+-- ------------------------------------------------------------
+-- can_see_conversation: helper de scope para conversations/messages.
+-- Ademas de setter/vendedor del contacto, suma el assigned_to propio
+-- de la conversacion.
+-- ------------------------------------------------------------
+create or replace function can_see_conversation(p_conversation_id uuid)
+returns boolean
+language plpgsql
+security definer
+stable
+as $$
+declare
+  v_workspace_id uuid;
+  v_assigned_to uuid;
+  v_contact_id uuid;
+  v_setter_id uuid;
+  v_vendedor_id uuid;
+  v_visibility text;
+begin
+  select conv.workspace_id, conv.assigned_to, conv.contact_id
+    into v_workspace_id, v_assigned_to, v_contact_id
+  from conversations conv
+  where conv.id = p_conversation_id;
+
+  if v_workspace_id is null or not is_workspace_member(v_workspace_id) then
+    return false;
+  end if;
+
+  if is_workspace_admin(v_workspace_id) then
+    return true;
+  end if;
+
+  if v_assigned_to = auth.uid() then
+    return true;
+  end if;
+
+  if v_contact_id is not null then
+    select setter_id, vendedor_id into v_setter_id, v_vendedor_id
+    from contacts where id = v_contact_id;
+
+    if v_setter_id = auth.uid() or v_vendedor_id = auth.uid() then
+      return true;
+    end if;
+  end if;
+
+  if v_assigned_to is null and v_setter_id is null and v_vendedor_id is null then
+    select unassigned_leads_visible_to into v_visibility
+    from workspaces where id = v_workspace_id;
+
+    if v_visibility = 'everyone' then
+      return true;
+    end if;
+  end if;
+
+  return false;
+end;
+$$;
+
+revoke all on function can_see_contact(uuid) from public;
+revoke all on function can_see_conversation(uuid) from public;
+grant execute on function can_see_contact(uuid) to authenticated;
+grant execute on function can_see_conversation(uuid) to authenticated;
+
+-- ------------------------------------------------------------
+-- CONTACTS: reemplaza el scope "todo el workspace" por el scope de leads
+-- ------------------------------------------------------------
+drop policy if exists "Users can view contacts in their workspaces" on contacts;
+drop policy if exists "Users can manage contacts in their workspaces" on contacts;
+
+create policy "Scoped select on contacts"
+  on contacts for select
+  using (can_see_contact(id));
+
+create policy "Workspace members can create contacts"
+  on contacts for insert
+  with check (is_workspace_member(workspace_id));
+
+create policy "Scoped update on contacts"
+  on contacts for update
+  using (can_see_contact(id))
+  with check (can_see_contact(id));
+
+create policy "Scoped delete on contacts"
+  on contacts for delete
+  using (can_see_contact(id));
+
+-- ------------------------------------------------------------
+-- CONVERSATIONS: idem
+-- ------------------------------------------------------------
+drop policy if exists "Users can view conversations in their workspaces" on conversations;
+drop policy if exists "Users can manage conversations in their workspaces" on conversations;
+
+create policy "Scoped select on conversations"
+  on conversations for select
+  using (can_see_conversation(id));
+
+create policy "Workspace members can create conversations"
+  on conversations for insert
+  with check (is_workspace_member(workspace_id));
+
+create policy "Scoped update on conversations"
+  on conversations for update
+  using (can_see_conversation(id))
+  with check (can_see_conversation(id));
+
+create policy "Scoped delete on conversations"
+  on conversations for delete
+  using (can_see_conversation(id));
+
+-- ------------------------------------------------------------
+-- MESSAGES: heredan el scope de su conversation
+-- ------------------------------------------------------------
+drop policy if exists "Users can view messages via conversation" on messages;
+drop policy if exists "Users can insert messages via conversation" on messages;
+
+create policy "Scoped select on messages"
+  on messages for select
+  using (can_see_conversation(conversation_id));
+
+create policy "Scoped insert on messages"
+  on messages for insert
+  with check (can_see_conversation(conversation_id));
+
+-- ============================================================
+-- MIGRATION 21: WHATSAPP CHANNEL FIELDS
+-- ============================================================
+-- ============================================================
+-- CHANNELS: campos para instancias de WhatsApp (Evolution API) (F6)
+-- ============================================================
+-- 'whatsapp' ya es una plataforma valida en channels (migracion 00016).
+-- Evolution API no usa OAuth como Zernio: conecta por instancia + QR.
+-- Se reutiliza la tabla channels existente (no se crea una tabla aparte)
+-- sumando los campos que ese flujo necesita.
+-- ============================================================
+
+alter table channels
+  add column if not exists evolution_instance_name text,
+  add column if not exists connection_status text not null default 'disconnected',
+  add column if not exists qr_code text,
+  add column if not exists last_connected_at timestamptz,
+  add column if not exists disconnected_at timestamptz,
+  add column if not exists disconnected_notified_at timestamptz;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'channels_connection_status_check'
+  ) then
+    alter table channels
+      add constraint channels_connection_status_check
+      check (connection_status in ('disconnected', 'connecting', 'connected', 'error'));
+  end if;
+end $$;
+
+create unique index if not exists idx_channels_evolution_instance
+  on channels(evolution_instance_name)
+  where evolution_instance_name is not null;
+
+-- ============================================================
+-- MIGRATION 22: ADMIN NOTIFICATIONS
+-- ============================================================
+-- ============================================================
+-- ADMIN NOTIFICATIONS: aviso dentro de la app (F6)
+-- ============================================================
+-- Notificacion in-app a Owner/Admin cuando se desconecta un canal
+-- (por ahora, WhatsApp). El envio por email (Resend) se agrega en el
+-- Bloque 2; esta tabla queda lista para que ese bloque la reutilice
+-- con otros tipos de evento.
+-- Solo el sistema (service role, desde el webhook) inserta filas.
+-- ============================================================
+
+create table if not exists admin_notifications (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  type text not null,
+  title text not null,
+  message text not null,
+  channel_id uuid references channels(id) on delete set null,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_notifications_workspace on admin_notifications(workspace_id);
+create index if not exists idx_admin_notifications_unread
+  on admin_notifications(workspace_id, read_at)
+  where read_at is null;
+
+alter table admin_notifications enable row level security;
+
+drop policy if exists "Owner and admin can view notifications" on admin_notifications;
+create policy "Owner and admin can view notifications"
+  on admin_notifications for select
+  using (is_workspace_admin(workspace_id));
+
+drop policy if exists "Owner and admin can mark notifications as read" on admin_notifications;
+create policy "Owner and admin can mark notifications as read"
+  on admin_notifications for update
+  using (is_workspace_admin(workspace_id))
+  with check (is_workspace_admin(workspace_id));
+
+-- Sin policy de insert/delete para authenticated: solo el service role
+-- (que bypassea RLS) crea o purga estas filas.
+grant select, update on admin_notifications to authenticated;
+
+-- ============================================================
+-- MIGRATION 23: TEAM ROLE MANAGEMENT RLS
+-- ============================================================
+-- ============================================================
+-- TEAM: Owner y Admin pueden cambiar el rol de un miembro (F3)
+-- ============================================================
+-- Antes, solo el Owner podia actualizar workspace_members (por eso
+-- Admin no podia cambiar roles). Se amplia a Owner/Admin, pero se
+-- bloquea a nivel de base que alguien le cambie el rol al Owner o que
+-- se asigne el rol 'owner' por esta via (evita transferencias de
+-- ownership accidentales).
+-- ============================================================
+
+drop policy if exists "Owners can update members" on workspace_members;
+
+create policy "Owner and admin can update member roles"
+  on workspace_members for update
+  using (
+    is_workspace_admin(workspace_members.workspace_id)
+    and workspace_members.role <> 'owner'
+  )
+  with check (
+    is_workspace_admin(workspace_members.workspace_id)
+    and role in ('admin', 'member')
+  );
+
+-- ============================================================
+-- MIGRATION 24: CHANNELS ADMIN RLS
+-- ============================================================
+-- ============================================================
+-- CHANNELS: solo Owner/Admin gestionan canales (F3)
+-- ============================================================
+-- Antes, cualquier miembro del workspace podia insertar/editar/borrar
+-- canales por RLS (la restriccion era solo de UI). "Member no puede...
+-- gestionar canales" tiene que valer tambien en la base de datos.
+-- Select se mantiene abierto a todo el workspace (la bandeja necesita
+-- leer los canales para mostrar el icono de plataforma, etc).
+-- ============================================================
+
+drop policy if exists "Users can manage channels in their workspaces" on channels;
+
+create policy "Owner and admin can insert channels"
+  on channels for insert
+  with check (is_workspace_admin(workspace_id));
+
+create policy "Owner and admin can update channels"
+  on channels for update
+  using (is_workspace_admin(workspace_id))
+  with check (is_workspace_admin(workspace_id));
+
+create policy "Owner and admin can delete channels"
+  on channels for delete
+  using (is_workspace_admin(workspace_id));
+
+-- ============================================================
+-- MIGRATION 25: WORKSPACES ADMIN RLS
+-- ============================================================
+-- ============================================================
+-- WORKSPACES: solo Owner/Admin editan la configuracion (F3)
+-- ============================================================
+-- Antes, cualquier miembro podia hacer UPDATE sobre su fila en
+-- workspaces por RLS, incluyendo campos sensibles (API keys, webhook
+-- secret, config de scope de leads). "Member no puede... cambiar
+-- configuracion del workspace" tiene que valer en la base, no solo
+-- ocultando la pantalla de Settings.
+-- ============================================================
+
+drop policy if exists "Users can update their workspaces" on workspaces;
+
+create policy "Owner and admin can update their workspace"
+  on workspaces for update
+  using (is_workspace_admin(id))
+  with check (is_workspace_admin(id));
+

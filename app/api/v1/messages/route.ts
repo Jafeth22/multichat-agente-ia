@@ -6,7 +6,10 @@ import { messagePreview } from "@/lib/message-preview";
 /**
  * GET /api/v1/messages?conversationId=...
  *
- * Fetches messages from the Zernio API (source of truth) instead of a local mirror.
+ * Instagram (Zernio): trae los mensajes en vivo desde la API de Zernio
+ * (fuente de verdad). WhatsApp (Evolution API) no tiene un endpoint asi
+ * de confiable, asi que esos mensajes se guardan localmente por el
+ * webhook y se leen directo de la tabla `messages`.
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -18,6 +21,25 @@ export async function GET(request: NextRequest) {
   const conversationId = request.nextUrl.searchParams.get("conversationId");
   if (!conversationId) {
     return NextResponse.json({ error: "conversationId required" }, { status: 400 });
+  }
+
+  const { data: conversationMeta } = await supabase
+    .from("conversations")
+    .select("channels(platform)")
+    .eq("id", conversationId)
+    .single();
+
+  const channelMeta = conversationMeta?.channels as { platform: string } | null;
+
+  if (channelMeta?.platform === "whatsapp") {
+    const { data: messages, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(messages ?? []);
   }
 
   // Look up the Zernio conversation ID and workspace API key
@@ -60,7 +82,9 @@ export async function GET(request: NextRequest) {
       (res.data as { data?: unknown[] })?.data ??
       [];
 
-    // Map Zernio messages to the shape the inbox UI expects
+    // Map Zernio messages to the shape the inbox UI expects.
+    // storyReply/isStoryMention: Instagram-only fields Zernio sends inline on
+    // message.received (no separate "story reply" event) — see lib/zernio-webhook.ts.
     const messages = zernioMessages.map((m: any) => ({
       id: m.id,
       conversation_id: conversationId,
@@ -76,6 +100,8 @@ export async function GET(request: NextRequest) {
       sent_by_user_id: null,
       status: "sent",
       created_at: m.sentAt ?? m.createdAt ?? new Date().toISOString(),
+      story_reply: m.storyReply ? { storyId: m.storyReply.storyId, storyUrl: m.storyReply.storyUrl ?? null } : null,
+      is_story_mention: m.isStoryMention ?? false,
     }));
 
     return NextResponse.json(messages);
@@ -91,7 +117,9 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/v1/messages
  *
- * Sends a message via Zernio API. No local message storage — Zernio is the source of truth.
+ * Instagram (Zernio): envia via la API de Zernio, que guarda el mensaje
+ * (no hay insert local). WhatsApp (Evolution API): envia via Evolution y
+ * ademas inserta el mensaje en la tabla local `messages`.
  */
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -119,6 +147,15 @@ export async function POST(request: NextRequest) {
 
   if (!conversation) {
     return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+  }
+
+  const channelInfo = conversation.channels as {
+    platform: string;
+    evolution_instance_name: string | null;
+  } | null;
+
+  if (channelInfo?.platform === "whatsapp") {
+    return sendWhatsappMessage(supabase, user.id, conversation, channelInfo, text);
   }
 
   if (!conversation.late_conversation_id) {
@@ -186,6 +223,71 @@ export async function POST(request: NextRequest) {
     console.error("Failed to send message via Zernio API:", error);
     return NextResponse.json(
       { error: `Failed to send message: ${error}` },
+      { status: 500 }
+    );
+  }
+}
+
+async function sendWhatsappMessage(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  conversation: { id: string; channel_id: string; contact_id: string | null },
+  channelInfo: { evolution_instance_name: string | null },
+  text: string
+) {
+  if (!channelInfo.evolution_instance_name) {
+    return NextResponse.json({ error: "Instancia de WhatsApp no configurada" }, { status: 400 });
+  }
+
+  if (!conversation.contact_id) {
+    return NextResponse.json({ error: "Conversacion sin contacto" }, { status: 400 });
+  }
+
+  const { data: contactChannel } = await supabase
+    .from("contact_channels")
+    .select("platform_sender_id")
+    .eq("channel_id", conversation.channel_id)
+    .eq("contact_id", conversation.contact_id)
+    .single();
+
+  const phone = contactChannel?.platform_sender_id;
+  if (!phone) {
+    return NextResponse.json({ error: "No se encontro el numero de telefono del contacto" }, { status: 400 });
+  }
+
+  try {
+    const evolution = await import("@/lib/evolution-client");
+    const res = await evolution.sendTextMessage(channelInfo.evolution_instance_name, phone, text);
+    const messageId = res.key?.id ?? null;
+
+    const { data: message, error } = await supabase
+      .from("messages")
+      .insert({
+        conversation_id: conversation.id,
+        direction: "outbound",
+        text,
+        platform_message_id: messageId,
+        sent_by_user_id: userId,
+        status: "sent",
+      })
+      .select("*")
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await supabase
+      .from("conversations")
+      .update({
+        last_message_at: new Date().toISOString(),
+        last_message_preview: messagePreview(text),
+      })
+      .eq("id", conversation.id);
+
+    return NextResponse.json(message, { status: 201 });
+  } catch (error) {
+    console.error("Failed to send WhatsApp message via Evolution API:", error);
+    return NextResponse.json(
+      { error: `Failed to send message: ${error instanceof Error ? error.message : error}` },
       { status: 500 }
     );
   }

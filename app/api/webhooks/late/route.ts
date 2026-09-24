@@ -30,6 +30,10 @@ interface WebhookPayload {
     };
     sentAt: string;
     isRead: boolean;
+    /** Instagram only: presente cuando el usuario respondio a una historia nuestra. */
+    storyReply?: { storyId: string; storyUrl?: string } | null;
+    /** Instagram only: true cuando el usuario nos menciono en su propia historia. */
+    isStoryMention?: boolean;
   };
   conversation: {
     id: string;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createZernioClient } from "@/lib/zernio-client";
+import * as evolution from "@/lib/evolution-client";
 
 async function getWorkspace(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -38,7 +39,7 @@ export async function DELETE(
 
   const { data: channel } = await supabase
     .from("channels")
-    .select("id, late_account_id")
+    .select("id, late_account_id, platform, evolution_instance_name")
     .eq("id", channelId)
     .eq("workspace_id", workspace.id)
     .single();
@@ -46,7 +47,19 @@ export async function DELETE(
   if (!channel)
     return NextResponse.json({ error: "Channel not found" }, { status: 404 });
 
-  if (workspace.late_api_key_encrypted) {
+  if (channel.platform === "whatsapp") {
+    if (channel.evolution_instance_name) {
+      try {
+        await evolution.deleteInstance(channel.evolution_instance_name);
+      } catch (error) {
+        console.error("Failed to delete Evolution instance:", error);
+        return NextResponse.json(
+          { error: `Failed to disconnect on Evolution API: ${error instanceof Error ? error.message : String(error)}` },
+          { status: 502 }
+        );
+      }
+    }
+  } else if (workspace.late_api_key_encrypted) {
     const zernio = createZernioClient(workspace.late_api_key_encrypted);
     try {
       const res = await zernio.accounts.deleteAccount({

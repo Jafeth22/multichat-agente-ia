@@ -142,6 +142,12 @@ export interface Database {
           is_active: boolean;
           last_comment_cursor: string | null;
           comment_rules: Json | null;
+          evolution_instance_name: string | null;
+          connection_status: "disconnected" | "connecting" | "connected" | "error";
+          qr_code: string | null;
+          last_connected_at: string | null;
+          disconnected_at: string | null;
+          disconnected_notified_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -158,6 +164,12 @@ export interface Database {
           is_active?: boolean;
           last_comment_cursor?: string | null;
           comment_rules?: Json | null;
+          evolution_instance_name?: string | null;
+          connection_status?: "disconnected" | "connecting" | "connected" | "error";
+          qr_code?: string | null;
+          last_connected_at?: string | null;
+          disconnected_at?: string | null;
+          disconnected_notified_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -172,6 +184,12 @@ export interface Database {
           is_active?: boolean;
           last_comment_cursor?: string | null;
           comment_rules?: Json | null;
+          evolution_instance_name?: string | null;
+          connection_status?: "disconnected" | "connecting" | "connected" | "error";
+          qr_code?: string | null;
+          last_connected_at?: string | null;
+          disconnected_at?: string | null;
+          disconnected_notified_at?: string | null;
           updated_at?: string;
         };
         Relationships: [
@@ -194,6 +212,8 @@ export interface Database {
           is_subscribed: boolean;
           last_interaction_at: string | null;
           metadata: Json | null;
+          setter_id: string | null;
+          vendedor_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -206,6 +226,8 @@ export interface Database {
           is_subscribed?: boolean;
           last_interaction_at?: string | null;
           metadata?: Json | null;
+          setter_id?: string | null;
+          vendedor_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -216,6 +238,8 @@ export interface Database {
           is_subscribed?: boolean;
           last_interaction_at?: string | null;
           metadata?: Json | null;
+          setter_id?: string | null;
+          vendedor_id?: string | null;
           updated_at?: string;
         };
         Relationships: [
@@ -696,6 +720,40 @@ export interface Database {
             columns: ["conversation_id"];
             isOneToOne: false;
             referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      admin_notifications: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          type: string;
+          title: string;
+          message: string;
+          channel_id: string | null;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          type: string;
+          title: string;
+          message: string;
+          channel_id?: string | null;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          read_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "admin_notifications_workspace_id_fkey";
+            columns: ["workspace_id"];
+            isOneToOne: false;
+            referencedRelation: "workspaces";
             referencedColumns: ["id"];
           },
         ];

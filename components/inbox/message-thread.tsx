@@ -2,13 +2,19 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Paperclip, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2 } from "lucide-react";
+import { Send, Paperclip, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2, Circle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PlatformIcon } from "@/components/platform-icon";
 import type { Database, ConversationStatus } from "@/lib/types/database";
 
-type Message = Database["public"]["Tables"]["messages"]["Row"];
+// story_reply/is_story_mention: Instagram-only, no llegan de la tabla
+// messages local (Zernio es la fuente de verdad) sino del endpoint
+// /api/v1/messages, que las agrega al leer de la API de Zernio.
+type Message = Database["public"]["Tables"]["messages"]["Row"] & {
+  story_reply?: { storyId: string; storyUrl: string | null } | null;
+  is_story_mention?: boolean;
+};
 type Conversation = Database["public"]["Tables"]["conversations"]["Row"] & {
   contacts: Database["public"]["Tables"]["contacts"]["Row"] | null;
 };
@@ -61,6 +67,28 @@ function MessageBubble({ message }: { message: Message }) {
       )}
 
       <div className="max-w-[70%]">
+        {message.story_reply && (
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Circle className="h-3 w-3" />
+            <span>Respondio a tu historia</span>
+            {message.story_reply.storyUrl && (
+              <a
+                href={message.story_reply.storyUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                ver
+              </a>
+            )}
+          </div>
+        )}
+        {message.is_story_mention && (
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Circle className="h-3 w-3" />
+            <span>Te menciono en su historia</span>
+          </div>
+        )}
         <div
           className={cn(
             "rounded-2xl px-4 py-2 text-sm",

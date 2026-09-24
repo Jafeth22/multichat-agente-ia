@@ -21,6 +21,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
+import { NotificationsBell } from "@/components/notifications-bell";
 import type { Database } from "@/lib/types/database";
 
 type Workspace = Database["public"]["Tables"]["workspaces"]["Row"];
@@ -46,18 +47,27 @@ const navigation = [
   { name: "Sequences", href: "/dashboard/sequences", icon: ListOrdered },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Growth", href: "/dashboard/growth", icon: Sprout },
-  { name: "Channels", href: "/dashboard/channels", icon: Plug },
-  { name: "Settings", href: "/dashboard/settings", icon: Settings },
+  // Solo Owner/Admin gestionan canales y configuracion del workspace (F3).
+  { name: "Channels", href: "/dashboard/channels", icon: Plug, adminOnly: true },
+  { name: "Settings", href: "/dashboard/settings", icon: Settings, adminOnly: true },
 ];
 
 export function Sidebar({
   workspace,
   workspaces,
+  role,
+  notifications = [],
 }: {
   workspace: Workspace;
   user: { id: string; email?: string };
   workspaces: WorkspaceItem[];
+  role: string;
+  notifications?: { id: string; title: string; message: string; created_at: string }[];
 }) {
+  const isOwnerOrAdmin = role === "owner" || role === "admin";
+  const visibleNavigation = navigation.filter(
+    (item) => !item.adminOnly || isOwnerOrAdmin
+  );
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
@@ -86,7 +96,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 space-y-1 p-3">
-        {navigation.map((item) => {
+        {visibleNavigation.map((item) => {
           const isActive = pathname.startsWith(item.href);
           return (
             <Link
@@ -107,6 +117,9 @@ export function Sidebar({
       </nav>
 
       <div className="border-t border-sidebar-border p-3 space-y-1">
+        {isOwnerOrAdmin && (
+          <NotificationsBell workspaceId={workspace.id} notifications={notifications} />
+        )}
         <button
           onClick={toggleTheme}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"

@@ -1,8 +1,8 @@
-import { getWorkspace } from "@/lib/workspace";
+import { requireWorkspaceAdmin } from "@/lib/workspace";
 import { SettingsView } from "./settings-view";
 
 export default async function SettingsPage() {
-  const { workspace } = await getWorkspace();
+  const { workspace } = await requireWorkspaceAdmin();
 
   return (
     <SettingsView

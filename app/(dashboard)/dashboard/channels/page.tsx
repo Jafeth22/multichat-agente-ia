@@ -1,8 +1,8 @@
-import { getWorkspace } from "@/lib/workspace";
+import { requireWorkspaceAdmin } from "@/lib/workspace";
 import { ChannelsView } from "./channels-view";
 
 export default async function ChannelsPage() {
-  const { workspace, supabase } = await getWorkspace();
+  const { workspace, supabase } = await requireWorkspaceAdmin();
 
   const { data: channels } = await supabase
     .from("channels")

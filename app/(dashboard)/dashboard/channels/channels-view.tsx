@@ -11,6 +11,8 @@ import {
   RefreshCw,
   Loader2,
   Trash2,
+  X,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -23,6 +25,11 @@ import {
   platformLabel,
   type Platform,
 } from "@/lib/platforms";
+import {
+  createWhatsappInstance,
+  refreshWhatsappQr,
+  disconnectWhatsappInstance,
+} from "@/lib/actions/whatsapp";
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
 
@@ -66,7 +73,32 @@ export function ChannelsView({
   const [showPlatformPicker, setShowPlatformPicker] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [whatsappModalChannel, setWhatsappModalChannel] = useState<Channel | null>(null);
+  const [whatsappActionError, setWhatsappActionError] = useState<string | null>(null);
+  const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Mientras el modal de QR esta abierto, refresca el canal cada 3s para
+  // detectar cuando Evolution API confirma la conexion (evento
+  // connection.update procesado por el webhook interno).
+  useEffect(() => {
+    if (!whatsappModalChannel || whatsappModalChannel.connection_status === "connected") {
+      return;
+    }
+    const supabase = createClient();
+    const interval = setInterval(async () => {
+      const { data } = await supabase
+        .from("channels")
+        .select("*")
+        .eq("id", whatsappModalChannel.id)
+        .single();
+      if (data) {
+        setChannels((prev) => prev.map((c) => (c.id === data.id ? data : c)));
+        setWhatsappModalChannel(data);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [whatsappModalChannel]);
 
   // Close picker on outside click
   useEffect(() => {
@@ -82,6 +114,21 @@ export function ChannelsView({
   }, [showPlatformPicker]);
 
   async function handleConnect(platform: Platform) {
+    if (platform === "whatsapp") {
+      setConnecting(platform);
+      setShowPlatformPicker(false);
+      const result = await createWhatsappInstance();
+      setConnecting(null);
+      if (result.error || !result.channel) {
+        setSyncMessage(result.error || "No se pudo crear la instancia de WhatsApp");
+        setTimeout(() => setSyncMessage(null), 4000);
+        return;
+      }
+      setChannels((prev) => [result.channel as Channel, ...prev]);
+      setWhatsappModalChannel(result.channel as Channel);
+      return;
+    }
+
     setConnecting(platform);
     try {
       const res = await fetch("/api/v1/channels/connect", {
@@ -107,6 +154,44 @@ export function ChannelsView({
       setConnecting(null);
       setShowPlatformPicker(false);
     }
+  }
+
+  async function handleReconnectWhatsapp(channel: Channel) {
+    setWhatsappActionError(null);
+    setWhatsappModalChannel(channel);
+    const result = await refreshWhatsappQr(channel.id);
+    if (result.error) {
+      setWhatsappActionError(result.error);
+      return;
+    }
+    setChannels((prev) =>
+      prev.map((c) =>
+        c.id === channel.id
+          ? { ...c, qr_code: result.qrCode ?? null, connection_status: "connecting" }
+          : c
+      )
+    );
+    setWhatsappModalChannel((prev) =>
+      prev ? { ...prev, qr_code: result.qrCode ?? null, connection_status: "connecting" } : prev
+    );
+  }
+
+  async function handleDisconnectWhatsapp(channel: Channel) {
+    setDisconnectingId(channel.id);
+    const result = await disconnectWhatsappInstance(channel.id);
+    if (result.error) {
+      setSyncMessage(result.error);
+      setTimeout(() => setSyncMessage(null), 4000);
+    } else {
+      setChannels((prev) =>
+        prev.map((c) =>
+          c.id === channel.id
+            ? { ...c, connection_status: "disconnected", qr_code: null }
+            : c
+        )
+      );
+    }
+    setDisconnectingId(null);
   }
 
   async function handleSync() {
@@ -403,6 +488,47 @@ export function ChannelsView({
                     </span>
                   </div>
 
+                  {channel.platform === "whatsapp" && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                          channel.connection_status === "connected"
+                            ? "bg-green-100 text-green-700"
+                            : channel.connection_status === "connecting"
+                            ? "bg-yellow-100 text-yellow-700"
+                            : channel.connection_status === "error"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-muted text-muted-foreground"
+                        )}
+                      >
+                        {channel.connection_status === "connected"
+                          ? "Conectado"
+                          : channel.connection_status === "connecting"
+                          ? "Esperando QR"
+                          : channel.connection_status === "error"
+                          ? "Error"
+                          : "Desconectado"}
+                      </span>
+                      {channel.connection_status === "connected" ? (
+                        <button
+                          onClick={() => handleDisconnectWhatsapp(channel)}
+                          disabled={disconnectingId === channel.id}
+                          className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
+                        >
+                          {disconnectingId === channel.id ? "Desconectando..." : "Desconectar"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleReconnectWhatsapp(channel)}
+                          className="text-[11px] font-medium text-primary hover:underline"
+                        >
+                          {channel.connection_status === "connecting" ? "Ver QR" : "Reconectar"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {(() => {
                     const dm = getDmLink(channel.platform as Platform, channel.username);
                     if (!dm.url) return null;
@@ -460,6 +586,76 @@ export function ChannelsView({
         onConfirm={handleDelete}
         onCancel={() => setChannelToDelete(null)}
       />
+
+      {whatsappModalChannel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Conectar WhatsApp</h3>
+              <button
+                onClick={() => {
+                  setWhatsappModalChannel(null);
+                  setWhatsappActionError(null);
+                }}
+                className="rounded-lg p-1 text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {whatsappActionError && (
+              <div className="mt-3 flex items-start gap-2 rounded-lg bg-red-50 p-2.5 text-xs text-red-700">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>{whatsappActionError}</span>
+              </div>
+            )}
+
+            {whatsappModalChannel.connection_status === "connected" ? (
+              <div className="mt-6 flex flex-col items-center gap-2 py-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-600">
+                  <Check className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-medium">Numero conectado</p>
+                <p className="text-center text-xs text-muted-foreground">
+                  Ya podes recibir y responder mensajes de WhatsApp desde la bandeja.
+                </p>
+              </div>
+            ) : whatsappModalChannel.qr_code ? (
+              <div className="mt-4 flex flex-col items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={
+                    whatsappModalChannel.qr_code.startsWith("data:")
+                      ? whatsappModalChannel.qr_code
+                      : `data:image/png;base64,${whatsappModalChannel.qr_code}`
+                  }
+                  alt="Codigo QR de WhatsApp"
+                  className="h-56 w-56 rounded-lg border border-border"
+                />
+                <p className="text-center text-xs text-muted-foreground">
+                  Abri WhatsApp en tu celular, anda a{" "}
+                  <span className="font-medium text-foreground">
+                    Dispositivos vinculados → Vincular un dispositivo
+                  </span>{" "}
+                  y escanea este codigo. La pantalla se actualiza sola cuando te conectes.
+                </p>
+                <button
+                  onClick={() => handleReconnectWhatsapp(whatsappModalChannel)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  Generar un QR nuevo
+                </button>
+              </div>
+            ) : (
+              <div className="mt-6 flex flex-col items-center gap-3 py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">Generando codigo QR...</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

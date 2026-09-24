@@ -56,3 +56,19 @@ export const getWorkspace = cache(async () => {
     supabase,
   };
 });
+
+/**
+ * Igual que getWorkspace, pero redirige a /dashboard si el usuario es
+ * Member. Usar en las paginas de Settings, Team y Channels, que son
+ * de gestion del workspace (F3: "Member no puede acceder a Settings
+ * del workspace ni gestionar canales ni equipo").
+ */
+export async function requireWorkspaceAdmin() {
+  const result = await getWorkspace();
+
+  if (result.role !== "owner" && result.role !== "admin") {
+    redirect("/dashboard");
+  }
+
+  return result;
+}

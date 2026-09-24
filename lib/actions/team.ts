@@ -14,7 +14,7 @@ export async function inviteTeamMember(
     return { error: "Workspace mismatch" };
   }
 
-  // Validate caller is owner
+  // Validate caller is owner or admin
   const { data: membership } = await supabase
     .from("workspace_members")
     .select("role")
@@ -22,8 +22,8 @@ export async function inviteTeamMember(
     .eq("user_id", user.id)
     .single();
 
-  if (membership?.role !== "owner") {
-    return { error: "Only workspace owners can invite members" };
+  if (membership?.role !== "owner" && membership?.role !== "admin") {
+    return { error: "Solo Owner o Admin pueden invitar miembros" };
   }
 
   const trimmedEmail = email.trim().toLowerCase();
@@ -112,6 +112,62 @@ export async function removeTeamMember(
 
   if (deleteError) {
     return { error: deleteError.message };
+  }
+
+  return { ok: true };
+}
+
+export async function changeTeamMemberRole(
+  workspaceId: string,
+  userId: string,
+  newRole: string
+) {
+  const { workspace, user, supabase } = await getWorkspace();
+
+  if (workspace.id !== workspaceId) {
+    return { error: "Workspace mismatch" };
+  }
+
+  // Validate caller is owner or admin
+  const { data: membership } = await supabase
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (membership?.role !== "owner" && membership?.role !== "admin") {
+    return { error: "Solo Owner o Admin pueden cambiar roles" };
+  }
+
+  if (userId === user.id) {
+    return { error: "No podes cambiar tu propio rol" };
+  }
+
+  const validRoles = ["member", "admin"];
+  if (!validRoles.includes(newRole)) {
+    return { error: "Rol invalido" };
+  }
+
+  const { data: target } = await supabase
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .single();
+
+  if (target?.role === "owner") {
+    return { error: "No se puede cambiar el rol del Owner" };
+  }
+
+  const { error: updateError } = await supabase
+    .from("workspace_members")
+    .update({ role: newRole })
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId);
+
+  if (updateError) {
+    return { error: updateError.message };
   }
 
   return { ok: true };
@@ -206,7 +262,7 @@ export async function revokeInvite(inviteId: string) {
     return { error: "Invite not found" };
   }
 
-  // Validate caller is owner
+  // Validate caller is owner or admin
   const { data: membership } = await supabase
     .from("workspace_members")
     .select("role")
@@ -214,8 +270,8 @@ export async function revokeInvite(inviteId: string) {
     .eq("user_id", user.id)
     .single();
 
-  if (membership?.role !== "owner") {
-    return { error: "Only workspace owners can revoke invites" };
+  if (membership?.role !== "owner" && membership?.role !== "admin") {
+    return { error: "Solo Owner o Admin pueden revocar invitaciones" };
   }
 
   const { error: deleteError } = await supabase

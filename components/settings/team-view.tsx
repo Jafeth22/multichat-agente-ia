@@ -20,6 +20,7 @@ import {
   inviteTeamMember,
   removeTeamMember,
   revokeInvite,
+  changeTeamMemberRole,
 } from "@/lib/actions/team";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -72,6 +73,7 @@ export function TeamView({
 }) {
   const router = useRouter();
   const isOwner = currentUserRole === "owner";
+  const isOwnerOrAdmin = isOwner || currentUserRole === "admin";
 
   const [members, setMembers] = useState(initialMembers);
   const [invites, setInvites] = useState(initialInvites);
@@ -86,6 +88,8 @@ export function TeamView({
   // Remove member
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [changingRoleId, setChangingRoleId] = useState<string | null>(null);
+  const [roleChangeError, setRoleChangeError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<{ userId: string; name: string } | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
 
@@ -122,6 +126,23 @@ export function TeamView({
     }
 
     setRemovingId(null);
+  }
+
+  async function handleRoleChange(userId: string, newRole: string) {
+    setChangingRoleId(userId);
+    setRoleChangeError(null);
+
+    const result = await changeTeamMemberRole(workspaceId, userId, newRole);
+
+    if (result.error) {
+      setRoleChangeError(result.error);
+    } else {
+      setMembers((prev) =>
+        prev.map((m) => (m.userId === userId ? { ...m, role: newRole } : m))
+      );
+    }
+
+    setChangingRoleId(null);
   }
 
   async function handleRevoke(inviteId: string) {
@@ -195,15 +216,31 @@ export function TeamView({
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0 ml-4">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
-                        roleStyles[member.role] ?? roleStyles.member
-                      )}
-                    >
-                      {roleIcons[member.role] ?? roleIcons.member}
-                      {member.role}
-                    </span>
+                    {isOwnerOrAdmin &&
+                    member.userId !== currentUserId &&
+                    member.role !== "owner" ? (
+                      <select
+                        value={member.role}
+                        onChange={(e) =>
+                          handleRoleChange(member.userId, e.target.value)
+                        }
+                        disabled={changingRoleId === member.userId}
+                        className="rounded-full border border-input bg-background px-2 py-0.5 text-[10px] font-medium capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                      >
+                        <option value="member">Member</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    ) : (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium capitalize",
+                          roleStyles[member.role] ?? roleStyles.member
+                        )}
+                      >
+                        {roleIcons[member.role] ?? roleIcons.member}
+                        {member.role}
+                      </span>
+                    )}
 
                     <span className="text-[10px] text-muted-foreground whitespace-nowrap">
                       Joined{" "}
@@ -234,10 +271,13 @@ export function TeamView({
                 </div>
               ))}
             </div>
+            {roleChangeError && (
+              <p className="mt-2 text-xs text-destructive">{roleChangeError}</p>
+            )}
           </section>
 
-          {/* Invite section (owners only) */}
-          {isOwner && (
+          {/* Invite section (owner and admin) */}
+          {isOwnerOrAdmin && (
             <>
               <hr className="border-border" />
 
@@ -358,7 +398,7 @@ export function TeamView({
                           </div>
                         </div>
 
-                        {isOwner && (
+                        {isOwnerOrAdmin && (
                           <button
                             onClick={() => setConfirmRevoke(invite.id)}
                             disabled={revokingId === invite.id}
