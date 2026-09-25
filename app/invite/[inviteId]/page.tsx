@@ -18,6 +18,11 @@ export default async function InvitePage({
     .single();
 
   if (error || !invite) {
+    if (error) {
+      // Nunca deberia fallar (service role, sin RLS): logueamos el motivo
+      // real en vez de mostrar siempre el mismo "not found" generico.
+      console.error(`[invite] lookup failed for id ${inviteId}:`, error);
+    }
     return (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="w-full max-w-sm text-center space-y-4">

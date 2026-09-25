@@ -40,6 +40,12 @@ function subscribeToThemeClass(callback: () => void) {
   return () => observer.disconnect();
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  owner: "Dueño",
+  admin: "Administrador",
+  member: "Miembro",
+};
+
 const navigation = [
   { name: "Flows", href: "/dashboard/flows", icon: GitBranch },
   { name: "Inbox", href: "/dashboard/inbox", icon: MessageSquare },
@@ -56,12 +62,13 @@ const navigation = [
 
 export function Sidebar({
   workspace,
+  user,
   workspaces,
   role,
   notifications = [],
 }: {
   workspace: Workspace;
-  user: { id: string; email?: string };
+  user: { id: string; email?: string; user_metadata?: { full_name?: string; name?: string } };
   workspaces: WorkspaceItem[];
   role: string;
   notifications?: { id: string; title: string; message: string; created_at: string }[];
@@ -94,7 +101,7 @@ export function Sidebar({
   return (
     <div className="flex h-full w-60 flex-col border-r border-border bg-sidebar">
       <div className="border-b border-sidebar-border px-3 py-3">
-        <WorkspaceSwitcher current={workspace} workspaces={workspaces} />
+        <WorkspaceSwitcher current={workspace} workspaces={workspaces} roleLabel={ROLE_LABELS[role] ?? role} />
       </div>
 
       <nav className="flex-1 space-y-1 p-3">

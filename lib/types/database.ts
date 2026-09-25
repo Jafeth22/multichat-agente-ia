@@ -1,4 +1,7 @@
 import type { Platform } from "@/lib/platforms";
+import type { Attribution } from "@/lib/attribution";
+
+export type { Attribution };
 
 export type Json =
   | string
@@ -10,6 +13,7 @@ export type Json =
 
 export type { Platform };
 
+export type LeadTemperature = "cold" | "warm" | "hot";
 export type FlowStatus = "draft" | "published" | "archived";
 export type ConversationStatus = "open" | "closed" | "snoozed";
 export type MessageDirection = "inbound" | "outbound";
@@ -214,6 +218,24 @@ export interface Database {
           metadata: Json | null;
           setter_id: string | null;
           vendedor_id: string | null;
+          phone: string | null;
+          secondary_email: string | null;
+          country: string | null;
+          instagram_username: string | null;
+          tiktok_username: string | null;
+          youtube_channel_id: string | null;
+          linkedin_profile_url: string | null;
+          whatsapp_phone: string | null;
+          twitter_username: string | null;
+          facebook_id: string | null;
+          next_followup_date: string | null;
+          do_not_contact: boolean;
+          do_not_contact_reason: string | null;
+          do_not_contact_at: string | null;
+          ai_conversation_summary: string | null;
+          lead_temperature: LeadTemperature | null;
+          deleted_at: string | null;
+          attribution: Attribution;
           created_at: string;
           updated_at: string;
         };
@@ -228,6 +250,24 @@ export interface Database {
           metadata?: Json | null;
           setter_id?: string | null;
           vendedor_id?: string | null;
+          phone?: string | null;
+          secondary_email?: string | null;
+          country?: string | null;
+          instagram_username?: string | null;
+          tiktok_username?: string | null;
+          youtube_channel_id?: string | null;
+          linkedin_profile_url?: string | null;
+          whatsapp_phone?: string | null;
+          twitter_username?: string | null;
+          facebook_id?: string | null;
+          next_followup_date?: string | null;
+          do_not_contact?: boolean;
+          do_not_contact_reason?: string | null;
+          do_not_contact_at?: string | null;
+          ai_conversation_summary?: string | null;
+          lead_temperature?: LeadTemperature | null;
+          deleted_at?: string | null;
+          attribution?: Attribution;
           created_at?: string;
           updated_at?: string;
         };
@@ -240,11 +280,100 @@ export interface Database {
           metadata?: Json | null;
           setter_id?: string | null;
           vendedor_id?: string | null;
+          phone?: string | null;
+          secondary_email?: string | null;
+          country?: string | null;
+          instagram_username?: string | null;
+          tiktok_username?: string | null;
+          youtube_channel_id?: string | null;
+          linkedin_profile_url?: string | null;
+          whatsapp_phone?: string | null;
+          twitter_username?: string | null;
+          facebook_id?: string | null;
+          next_followup_date?: string | null;
+          do_not_contact?: boolean;
+          do_not_contact_reason?: string | null;
+          do_not_contact_at?: string | null;
+          ai_conversation_summary?: string | null;
+          lead_temperature?: LeadTemperature | null;
+          deleted_at?: string | null;
+          attribution?: Attribution;
           updated_at?: string;
         };
         Relationships: [
           {
             foreignKeyName: "contacts_workspace_id_fkey";
+            columns: ["workspace_id"];
+            isOneToOne: false;
+            referencedRelation: "workspaces";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      contact_notes: {
+        Row: {
+          id: string;
+          contact_id: string;
+          workspace_id: string;
+          content: string;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          contact_id: string;
+          workspace_id: string;
+          content: string;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          contact_id?: string;
+          content?: string;
+          deleted_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "contact_notes_contact_id_fkey";
+            columns: ["contact_id"];
+            isOneToOne: false;
+            referencedRelation: "contacts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      audit_log: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          entity_type: string;
+          entity_id: string | null;
+          action: string;
+          changes: Json | null;
+          metadata: Json | null;
+          performed_by: string | null;
+          performed_at: string;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          entity_type: string;
+          entity_id?: string | null;
+          action: string;
+          changes?: Json | null;
+          metadata?: Json | null;
+          performed_by?: string | null;
+          performed_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "audit_log_workspace_id_fkey";
             columns: ["workspace_id"];
             isOneToOne: false;
             referencedRelation: "workspaces";
@@ -270,6 +399,7 @@ export interface Database {
           created_at?: string;
         };
         Update: {
+          contact_id?: string;
           platform_username?: string | null;
         };
         Relationships: [
@@ -624,6 +754,7 @@ export interface Database {
           last_message_preview: string | null;
           unread_count: number;
           is_automation_paused: boolean;
+          deleted_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -640,10 +771,12 @@ export interface Database {
           last_message_preview?: string | null;
           unread_count?: number;
           is_automation_paused?: boolean;
+          deleted_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
+          contact_id?: string;
           late_conversation_id?: string | null;
           status?: ConversationStatus;
           assigned_to?: string | null;
@@ -651,6 +784,7 @@ export interface Database {
           last_message_preview?: string | null;
           unread_count?: number;
           is_automation_paused?: boolean;
+          deleted_at?: string | null;
           updated_at?: string;
         };
         Relationships: [

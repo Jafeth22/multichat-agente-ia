@@ -10,6 +10,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Zernio } from "./zernio-client";
 import { messagePreview } from "@/lib/message-preview";
+import { findContactMatch, type CrossChannelIdentity } from "@/lib/cross-channel";
+import { logAuditEvent } from "@/lib/audit";
 
 /** Cap per channel: 4 pages x 50 conversations. */
 const MAX_PAGES_PER_CHANNEL = 4;
@@ -41,6 +43,13 @@ interface ZernioInboxConversation {
  * sender was already known on this channel.
  * With `stampExisting: false` an existing contact's last_interaction_at is
  * left untouched; the caller stamps it once the interaction is confirmed.
+ *
+ * Cross-channel detection (F12): when the sender is not yet linked to any
+ * contact on this channel, `matchIdentity` (phone/email/instagram username)
+ * is used to find an existing contact from another channel before creating
+ * a new one. An exact match links automatically (new `contact_channels` row
+ * + audit log); no match falls through to creating a new contact, stamped
+ * with `contactFields` (e.g. phone, whatsapp_phone, instagram_username).
  */
 export async function upsertContactForSender({
   supabase,
@@ -51,6 +60,8 @@ export async function upsertContactForSender({
   senderUsername,
   interactionAt,
   stampExisting = true,
+  matchIdentity,
+  contactFields,
 }: {
   supabase: SupabaseClient;
   channel: { id: string; workspace_id: string };
@@ -60,7 +71,11 @@ export async function upsertContactForSender({
   senderUsername?: string | null;
   interactionAt: string;
   stampExisting?: boolean;
-}): Promise<{ contactId: string; existed: boolean } | null> {
+  /** Used only to find a cross-channel match; does not get written anywhere. */
+  matchIdentity?: CrossChannelIdentity;
+  /** Columns stamped on `contacts` only when a new contact gets created. */
+  contactFields?: Record<string, string | null>;
+}): Promise<{ contactId: string; existed: boolean; linked?: boolean } | null> {
   const { data: existingContactChannel } = await supabase
     .from("contact_channels")
     .select("contact_id")
@@ -78,6 +93,41 @@ export async function upsertContactForSender({
     return { contactId: existingContactChannel.contact_id, existed: true };
   }
 
+  const match =
+    matchIdentity && Object.values(matchIdentity).some(Boolean)
+      ? await findContactMatch(supabase, channel.workspace_id, matchIdentity)
+      : null;
+
+  if (match) {
+    await supabase.from("contact_channels").insert({
+      contact_id: match.contactId,
+      channel_id: channel.id,
+      platform_sender_id: senderId,
+      platform_username: senderUsername ?? null,
+    });
+
+    await supabase
+      .from("contacts")
+      .update({ last_interaction_at: interactionAt })
+      .eq("id", match.contactId);
+
+    await logAuditEvent({
+      supabase,
+      workspaceId: channel.workspace_id,
+      entityType: "contact",
+      entityId: match.contactId,
+      action: "linked",
+      performedBy: null,
+      metadata: {
+        via: "cross_channel_auto",
+        match_field: match.matchField,
+        channel_id: channel.id,
+      },
+    });
+
+    return { contactId: match.contactId, existed: true, linked: true };
+  }
+
   const { data: newContact } = await supabase
     .from("contacts")
     .insert({
@@ -85,6 +135,7 @@ export async function upsertContactForSender({
       display_name: senderName,
       avatar_url: senderPicture,
       last_interaction_at: interactionAt,
+      ...(contactFields ?? {}),
     })
     .select("id")
     .single();
@@ -102,6 +153,16 @@ export async function upsertContactForSender({
     workspace_id: channel.workspace_id,
     contact_id: newContact.id,
     event_type: "contact_created",
+  });
+
+  await logAuditEvent({
+    supabase,
+    workspaceId: channel.workspace_id,
+    entityType: "contact",
+    entityId: newContact.id,
+    action: "created",
+    performedBy: null,
+    metadata: { via: "channel", channel_id: channel.id },
   });
 
   return { contactId: newContact.id, existed: false };

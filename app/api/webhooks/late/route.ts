@@ -214,6 +214,12 @@ async function processMessageEvent(
   const senderId = msg.sender.id;
   const senderName = msg.sender.name || msg.sender.username || senderId;
 
+  // La deteccion cross-canal (F12) solo aplica al username de Instagram:
+  // Facebook/Twitter (opcionales, F8) tambien llegan por este webhook pero
+  // no tienen una columna dedicada en contacts todavia.
+  const instagramUsername =
+    channel.platform === "instagram" ? msg.sender.username || null : null;
+
   const contact = await upsertContactForSender({
     supabase,
     channel,
@@ -222,6 +228,8 @@ async function processMessageEvent(
     senderPicture: msg.sender.picture || null,
     senderUsername: msg.sender.username || null,
     interactionAt: new Date().toISOString(),
+    matchIdentity: instagramUsername ? { instagramUsername } : undefined,
+    contactFields: instagramUsername ? { instagram_username: instagramUsername } : undefined,
   });
 
   if (!contact) {

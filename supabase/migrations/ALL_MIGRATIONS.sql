@@ -1971,3 +1971,323 @@ grant execute on function read_secret(text, uuid) to authenticated, service_role
 grant execute on function delete_secret(text, uuid) to authenticated, service_role;
 grant execute on function read_channel_secret(text, uuid) to authenticated, service_role;
 grant execute on function is_service_role() to authenticated, service_role;
+
+-- ============================================================
+-- MIGRATION 29: CONTACTS EXTENDED FIELDS
+-- ============================================================
+-- ============================================================
+-- CONTACTS: modelo extendido (F9) + atribucion (F10)
+-- ============================================================
+-- setter_id y vendedor_id ya se agregaron en el Bloque 1 (00019), los
+-- necesitaba el scope de leads por RLS desde ese momento. Este bloque
+-- suma el resto: identidad (telefono, redes, pais), seguimiento,
+-- "no contactar", resumen de IA, temperatura del lead, soft delete y
+-- el JSONB de atribucion (first_click / last_click).
+--
+-- phone y whatsapp_phone se normalizan a formato internacional
+-- (+XX...) desde la app antes de guardarse (lib/phone.ts); esta
+-- migracion no valida el formato, solo guarda texto.
+-- instagram_username se guarda sin "@".
+-- ============================================================
+
+alter table contacts
+  add column if not exists phone text,
+  add column if not exists secondary_email text,
+  add column if not exists country text,
+  add column if not exists instagram_username text,
+  add column if not exists tiktok_username text,
+  add column if not exists youtube_channel_id text,
+  add column if not exists linkedin_profile_url text,
+  add column if not exists whatsapp_phone text,
+  add column if not exists twitter_username text,
+  add column if not exists facebook_id text,
+  add column if not exists next_followup_date timestamptz,
+  add column if not exists do_not_contact boolean not null default false,
+  add column if not exists do_not_contact_reason text,
+  add column if not exists do_not_contact_at timestamptz,
+  add column if not exists ai_conversation_summary text,
+  add column if not exists lead_temperature text,
+  add column if not exists deleted_at timestamptz,
+  add column if not exists attribution jsonb not null default '{}'::jsonb;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'contacts_lead_temperature_check'
+  ) then
+    alter table contacts
+      add constraint contacts_lead_temperature_check
+      check (lead_temperature is null or lead_temperature in ('cold', 'warm', 'hot'));
+  end if;
+end $$;
+
+create index if not exists idx_contacts_phone on contacts(phone) where phone is not null;
+create index if not exists idx_contacts_email on contacts(email) where email is not null;
+create index if not exists idx_contacts_instagram_username on contacts(instagram_username) where instagram_username is not null;
+create index if not exists idx_contacts_tiktok_username on contacts(tiktok_username) where tiktok_username is not null;
+create index if not exists idx_contacts_whatsapp_phone on contacts(whatsapp_phone) where whatsapp_phone is not null;
+create index if not exists idx_contacts_deleted_at on contacts(deleted_at);
+
+-- Deduplicacion cross-canal (F12): busquedas exactas por telefono/email
+-- dentro del workspace, excluyendo lo borrado.
+create index if not exists idx_contacts_workspace_phone on contacts(workspace_id, phone) where phone is not null and deleted_at is null;
+create index if not exists idx_contacts_workspace_email on contacts(workspace_id, email) where email is not null and deleted_at is null;
+
+-- ============================================================
+-- MIGRATION 30: AUDIT LOG
+-- ============================================================
+-- ============================================================
+-- AUDIT LOG global (F20)
+-- ============================================================
+-- Tabla central de auditoria: que cambio, quien lo hizo, cuando y
+-- (si aplica) el valor anterior/nuevo. Nunca se edita ni se borra.
+--
+-- Se inserta solo desde el servidor con el service role (lib/audit.ts),
+-- nunca directo desde el cliente: por eso la policy de insert exige
+-- is_service_role() en vez de is_workspace_member(). Los Server Actions
+-- y webhooks ya corren en el servidor, asi que usan el cliente de
+-- service role para dejar el registro.
+-- ============================================================
+
+create table if not exists audit_log (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  entity_type text not null,
+  entity_id uuid,
+  action text not null,
+  changes jsonb,
+  metadata jsonb,
+  performed_by uuid references auth.users(id) on delete set null,
+  performed_at timestamptz not null default now()
+);
+
+create index if not exists idx_audit_log_workspace on audit_log(workspace_id, performed_at desc);
+create index if not exists idx_audit_log_entity on audit_log(entity_type, entity_id);
+create index if not exists idx_audit_log_performed_at on audit_log(performed_at);
+
+alter table audit_log enable row level security;
+
+-- Admin/Owner ven todo el historial del workspace; Member solo sus
+-- propias acciones (F20, 13b).
+drop policy if exists "Scoped select on audit_log" on audit_log;
+create policy "Scoped select on audit_log"
+  on audit_log for select
+  using (
+    is_workspace_member(workspace_id)
+    and (is_workspace_admin(workspace_id) or performed_by = auth.uid())
+  );
+
+drop policy if exists "Service role inserts audit_log" on audit_log;
+create policy "Service role inserts audit_log"
+  on audit_log for insert
+  with check (is_service_role());
+
+-- Nunca se edita ni se borra: sin policies de update/delete para
+-- authenticated. El GRANT de la tabla no incluye update/delete.
+grant select, insert on audit_log to authenticated;
+
+-- ============================================================
+-- MIGRATION 31: CONTACT NOTES
+-- ============================================================
+-- ============================================================
+-- CONTACT NOTES (F13)
+-- ============================================================
+-- workspace_id desnormalizado a proposito (7.4 del documento de
+-- requerimientos) para simplificar el RLS: evita un join contra
+-- contacts solo para saber el workspace.
+--
+-- Scope: cualquier miembro que pueda ver el contacto (can_see_contact,
+-- scope de leads del Bloque 1) puede leer y crear notas. Editar o
+-- borrar (soft) una nota es solo del autor o de Admin/Owner.
+-- ============================================================
+
+create table if not exists contact_notes (
+  id uuid primary key default gen_random_uuid(),
+  contact_id uuid not null references contacts(id) on delete cascade,
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  content text not null,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'contact_notes_content_not_empty'
+  ) then
+    alter table contact_notes
+      add constraint contact_notes_content_not_empty check (btrim(content) <> '');
+  end if;
+end $$;
+
+create index if not exists idx_contact_notes_contact on contact_notes(contact_id, created_at desc);
+create index if not exists idx_contact_notes_workspace on contact_notes(workspace_id);
+create index if not exists idx_contact_notes_deleted_at on contact_notes(deleted_at);
+
+drop trigger if exists set_updated_at on contact_notes;
+create trigger set_updated_at
+  before update on contact_notes
+  for each row execute function update_updated_at();
+
+alter table contact_notes enable row level security;
+
+drop policy if exists "Scoped select on contact_notes" on contact_notes;
+create policy "Scoped select on contact_notes"
+  on contact_notes for select
+  using (can_see_contact(contact_id) and deleted_at is null);
+
+drop policy if exists "Scoped insert on contact_notes" on contact_notes;
+create policy "Scoped insert on contact_notes"
+  on contact_notes for insert
+  with check (can_see_contact(contact_id) and created_by = auth.uid());
+
+-- Update cubre tanto editar el contenido como el soft delete
+-- (deleted_at = now()): autor, o Admin/Owner del workspace.
+drop policy if exists "Author or admin updates contact_notes" on contact_notes;
+create policy "Author or admin updates contact_notes"
+  on contact_notes for update
+  using (
+    deleted_at is null
+    and (created_by = auth.uid() or is_workspace_admin(workspace_id))
+  )
+  with check (created_by = auth.uid() or is_workspace_admin(workspace_id));
+
+-- Sin policy de delete para authenticated: siempre soft delete.
+grant select, insert, update on contact_notes to authenticated;
+
+-- ============================================================
+-- MIGRATION 32: SOFT DELETE
+-- ============================================================
+-- ============================================================
+-- SOFT DELETE (F15)
+-- ============================================================
+-- contacts.deleted_at y contact_notes.deleted_at ya se agregaron en
+-- 00029 y 00031. Esta migracion:
+-- 1. Agrega deleted_at a conversations.
+-- 2. Actualiza las policies de SELECT de contacts/conversations para
+--    ocultar lo borrado (ademas del filtro que ya hacen las pantallas).
+-- 3. Saca las policies de DELETE de contacts/conversations para
+--    authenticated: "Eliminar" siempre es deleted_at = now() (UPDATE),
+--    nunca un DELETE de verdad. El borrado definitivo solo lo hace el
+--    cron de purga (/api/cron/purge-deleted) con el service role, que
+--    no pasa por RLS.
+--
+-- response_templates no existe todavia (llega en el Bloque 4): cuando
+-- se cree, su migracion tiene que sumarle deleted_at desde el arranque.
+-- ============================================================
+
+alter table conversations
+  add column if not exists deleted_at timestamptz;
+
+create index if not exists idx_conversations_deleted_at on conversations(deleted_at);
+
+-- ------------------------------------------------------------
+-- CONTACTS
+-- ------------------------------------------------------------
+drop policy if exists "Scoped select on contacts" on contacts;
+create policy "Scoped select on contacts"
+  on contacts for select
+  using (can_see_contact(id) and deleted_at is null);
+
+-- El UPDATE se mantiene sin el filtro de deleted_at en el USING para
+-- una excepcion puntual: la propia accion de "eliminar" es un UPDATE
+-- que pone deleted_at = now() sobre una fila que todavia no esta
+-- borrada, asi que el USING (evaluado sobre la fila vieja) ya la deja
+-- pasar. Una vez borrada, can_see_contact() sigue siendo true pero no
+-- hay forma de "reeditarla" desde la UI (no hay boton de restaurar);
+-- si mas adelante se quiere bloquear tambien el UPDATE sobre lo ya
+-- borrado, se puede sumar "and deleted_at is null" aca.
+
+drop policy if exists "Scoped delete on contacts" on contacts;
+
+-- ------------------------------------------------------------
+-- CONVERSATIONS
+-- ------------------------------------------------------------
+drop policy if exists "Scoped select on conversations" on conversations;
+create policy "Scoped select on conversations"
+  on conversations for select
+  using (can_see_conversation(id) and deleted_at is null);
+
+drop policy if exists "Scoped delete on conversations" on conversations;
+
+-- ------------------------------------------------------------
+-- MESSAGES: heredan el scope de su conversation, que ya filtra
+-- deleted_at via can_see_conversation -> conversations (no hace falta
+-- tocar su policy, can_see_conversation ya solo mira conversaciones
+-- vivas indirectamente porque la fila de conversations sigue
+-- existiendo con deleted_at set; se deja pasar el mensaje mientras la
+-- conversacion no se purgo de verdad, que es el comportamiento
+-- esperado durante la ventana de 30 dias).
+-- ------------------------------------------------------------
+
+-- ============================================================
+-- MIGRATION 33: CONTACTS INSERT POLICY FIX
+-- ============================================================
+-- ============================================================
+-- FIX: "new row violates row-level security policy for table contacts"
+-- al crear un contacto nuevo desde /dashboard/contacts.
+-- ============================================================
+-- La policy de INSERT de contacts ("Workspace members can create
+-- contacts", de 00020_leads_scope_rls.sql) no la toco ninguna
+-- migracion del Bloque 3, pero se reafirma aca de forma defensiva
+-- (drop + create) para garantizar que exista tal cual se espera,
+-- sin importar el estado en el que haya quedado la base real.
+--
+-- De paso, blinda el UPDATE: create_contact no es el unico camino,
+-- asignar setter/vendedor o editar datos tambien son UPDATE y
+-- necesitan poder pasar el check aunque el contacto todavia no tenga
+-- setter/vendedor asignado (won't-fail-open, can_see_contact ya lo
+-- cubre, esto solo confirma que la policy exista).
+-- ============================================================
+
+drop policy if exists "Workspace members can create contacts" on contacts;
+create policy "Workspace members can create contacts"
+  on contacts for insert
+  with check (is_workspace_member(workspace_id));
+
+drop policy if exists "Scoped update on contacts" on contacts;
+create policy "Scoped update on contacts"
+  on contacts for update
+  using (can_see_contact(id))
+  with check (can_see_contact(id));
+
+-- Confirma tambien el GRANT a nivel tabla (00017 ya lo hace para todas,
+-- esto es un refuerzo idempotente y gratis).
+grant select, insert, update, delete on contacts to authenticated;
+
+-- ============================================================
+-- MIGRATION 34: GRANT SERVICE ROLE PRIVILEGES
+-- ============================================================
+-- ============================================================
+-- FIX: "permission denied for table workspace_invites" para service_role
+-- ============================================================
+-- 00017_grant_table_privileges.sql le dio GRANT a "anon" y "authenticated"
+-- (para que las policies de RLS se puedan evaluar), pero se olvido de
+-- "service_role". La mayoria de las tablas no lo sufrieron porque su
+-- service_role ya tenia privilegios heredados de otro lado, pero
+-- workspace_invites no, y la pagina /invite/[inviteId] (que lee con el
+-- service role a proposito, porque el usuario todavia puede no estar
+-- logueado) fallaba con "permission denied" en vez de encontrar la fila.
+--
+-- Esto lo cubre para TODAS las tablas de una, no solo workspace_invites,
+-- para que ninguna tabla futura (ni las de este proyecto ni las de un
+-- fork) pueda pisar el mismo problema.
+-- ============================================================
+
+grant usage on schema public to service_role;
+
+grant select, insert, update, delete
+  on all tables in schema public
+  to service_role;
+
+grant usage, select
+  on all sequences in schema public
+  to service_role;
+
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to service_role;
+
+alter default privileges in schema public
+  grant usage, select on sequences to service_role;

@@ -3,9 +3,9 @@
 | Bloque | Estado | Fecha | Notas |
 |---|---|---|---|
 | 0. Setup (fork clonado, `.env`, migraciones 00001-00017) | Hecho (verificado en Bloque 1) | 2026-09-23 | Repo en GitHub propio. `00017_grant_table_privileges.sql` agregada |
-| 1. Fork, deploy y foundation | Codigo listo, falta deploy manual | 2026-09-23 | Migraciones 00018-00025 escritas (no corridas contra Supabase todavia). Falta: crear proyecto Railway + Supabase Pro, correr migraciones, deploy. Ver detalle abajo |
-| 2. Email, integraciones y BYOK IA | Verificado en local, falta deploy a Vercel | 2026-09-24 | Migraciones 00018 (actualizada), 00026-00028 corridas contra Supabase. Zernio, WhatsApp y Resend conectados y probados en local. Ver detalle abajo |
-| 3. Modelo de contacto y CRM | Pendiente | | |
+| 1. Fork, deploy y foundation | Hecho, deploy en Vercel confirmado | 2026-09-24 | Migraciones 00018-00025 corridas contra Supabase. App desplegada en Vercel, Evolution API en Railway. Ver detalle abajo |
+| 2. Email, integraciones y BYOK IA | Hecho, deploy en Vercel confirmado | 2026-09-24 | Migraciones 00018 (actualizada), 00026-00028 corridas. Zernio, WhatsApp y Resend conectados y probados, deploy hecho y confirmado por el usuario. Ver detalle abajo |
+| 3. Modelo de contacto y CRM | Hecho, verificado contra Supabase real | 2026-09-25 | Migraciones 00029-00034 corridas. Bugs de RLS/permisos encontrados en la verificacion, corregidos. Ver detalle abajo |
 | 4. Bandeja, filtros y herramientas CRM | Pendiente | | |
 | Testing de fase | Pendiente | | |
 
@@ -21,11 +21,7 @@
 
 **Decision de arquitectura (2026-09-23, se aparta del documento de requerimientos):** la app se despliega en Vercel (no Railway) y Evolution API se mantiene en Railway como servicio aparte. Como no comparten red privada, el webhook de Evolution ya no confia en la red interna: lleva un secreto por canal en la URL (`/api/webhooks/evolution/[secret]`, guardado en `channels.webhook_secret`, mismo patron que ya usaba Zernio) para que nadie mas pueda mandarle eventos falsos. Por esto, el criterio F6 "`EVOLUTION_API_URL` apunta a la URL interna de Railway (no publica)" ya no aplica tal cual: ahora apunta a la URL **publica** de Evolution API en Railway, protegida por su API key.
 
-**Pendiente (actualizado 2026-09-24):**
-- ~~Correr las migraciones 00018-00025 contra Supabase real~~ — hecho (ver Bloque 2, ya corridas junto con 00026-00028).
-- ~~Verificar conexion de Instagram (Zernio) y WhatsApp~~ — hecho en local (ver verificacion en Bloque 2).
-- Sigue pendiente: crear el proyecto Evolution API en Railway si todavia no existe (el usuario ya tiene `EVOLUTION_API_URL`/`EVOLUTION_API_KEY` reales cargados, asi que probablemente ya este creado) y el deploy de la app en Vercel (ver Bloque 2).
-- Nota sobre el webhook de Evolution API: en local no se pudo confirmar que el webhook le llegue solo a la app (no puede, ver Bloque 2), asi que los nombres de campos del payload (`/api/webhooks/evolution`) siguen sin verificar contra un caso real. Se agrego un chequeo de respaldo que no depende del webhook, pero conviene revisar los logs de ese endpoint ni bien este desplegado.
+**Pendiente (actualizado 2026-09-24): ninguno.** Todo lo de este bloque quedo hecho y verificado (ver cierre en Bloque 2).
 
 ## Detalle Bloque 2 (2026-09-24)
 
@@ -65,7 +61,64 @@
   4. El campo "remitente" de Resend pedia un email completo (`notificaciones@tudominio.com`), no el dominio solo (`tudominio.com`) — la confusion vino de que el "dominio verificado" es un concepto de Resend, pero el campo de esta pantalla necesita una casilla que use ese dominio.
 - `npm run build`, `npm test` (65/65) y `npm run lint` (0 errores) pasan despues de estos fixes.
 
-**Pendiente (accion manual del usuario):**
-- Deploy a Vercel: cargar todas las variables de entorno ahi (Vercel no lee el `.env` local) — `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, y `NEXT_PUBLIC_APP_URL` (con la URL real de Vercel, corregida despues del primer deploy).
-- Confirmar que el webhook de WhatsApp funciona solo (sin el chequeo de respaldo) una vez desplegado, y decidir la frecuencia real de los cron jobs en `vercel.json`.
-- Punto de enganche para el Bloque 3 (ya anotado en el codigo): cuando exista `audit_log`, registrar ahi cada conexion/desconexion de una integracion (`integration_configs`) y cada email enviado (`email_logs`).
+**Deploy a Vercel confirmado por el usuario (2026-09-24).** Bloque 1 y Bloque 2 quedan cerrados.
+
+**Pendiente para mas adelante (no bloquea el Bloque 3):**
+- Decidir la frecuencia real de los cron jobs en `vercel.json` (hoy 1 vez por dia, el motor de flows necesita mucho mas seguido — ver nota arriba).
+- Confirmar en los logs de Vercel que el webhook de WhatsApp (`/api/webhooks/evolution`) le esta llegando solo a la app en produccion (sin depender del chequeo de respaldo agregado en el debugging de este bloque).
+- Punto de enganche para el Bloque 3 (ya anotado en el codigo): cuando exista `audit_log`, registrar ahi cada conexion/desconexion de una integracion (`integration_configs`) y cada email enviado (`email_logs`). **Nota: quedo pendiente, no se engancho en este bloque** (`integration_configs`/`email_logs` siguen sin loguear en `audit_log`; se puede sumar mas adelante sin romper nada).
+
+## Detalle Bloque 3 (2026-09-24)
+
+**Hecho (codigo):**
+- Migraciones `00029` a `00032` (idempotentes, con GRANT):
+  - `00029_contacts_extended_fields.sql`: F9 (telefono, redes, pais, seguimiento, no-contactar, resumen IA, temperatura, `deleted_at`) + F10 (`attribution` jsonb) en `contacts`, con todos los indices pedidos.
+  - `00030_audit_log.sql`: F20, tabla `audit_log` (Admin/Owner ven todo, Member solo sus propias acciones, insert solo por service role, nunca se edita ni se borra).
+  - `00031_contact_notes.sql`: F13, tabla `contact_notes` (autor o Admin/Owner edita/borra, scope por `can_see_contact`).
+  - `00032_soft_delete.sql`: F15, `deleted_at` en `conversations`, RLS de `contacts`/`conversations` actualizada para ocultar lo borrado, y se sacaron las policies de `DELETE` para `authenticated` (el "Eliminar" de la UI es siempre `deleted_at = now()`, nunca un DELETE real; el borrado definitivo solo lo hace el cron con el service role).
+- `lib/phone.ts`: normalizacion de telefono a formato internacional con `libphonenumber-js` (dependencia nueva, se evaluo hacerlo con un regex a mano y se descarto: la numeracion varia demasiado por pais). Incluye `normalizeWhatsAppJidPhone` para el numero que manda Baileys (E.164 sin el "+").
+- `lib/audit.ts`: helper unico `logAuditEvent` + `diffFields` para loguear en `audit_log` (siempre con el service role, la tabla no deja insertar a `authenticated`).
+- `lib/attribution.ts`: F10, `buildAttributionClick`/`applyAttribution` (`first_click` se graba una sola vez, `last_click` se pisa). **Importante:** ni el webhook de Zernio ni el de Evolution API mandan hoy datos de UTM/fbclid/gclid, asi que en la practica el campo va a quedar vacio hasta que exista una fuente real de esos datos (CSV del Bloque 4, o un link de captura propio mas adelante). La logica ya esta lista para ese momento.
+- `lib/cross-channel.ts` (F12): `findContactMatch` busca un contacto existente por telefono, email o username de Instagram (en ese orden, exacto). Se engancho en `upsertContactForSender` (`lib/inbox-sync.ts`): un remitente nuevo que matchea se vincula automatico (nuevo `contact_channels` + audit log "linked"); si no matchea, se crea el contacto nuevo (audit log "created"). Los dos webhooks (`app/api/webhooks/late/route.ts` para Instagram, `app/api/webhooks/evolution/[secret]/route.ts` para WhatsApp) ahora pasan el telefono/username normalizado.
+- **Decision sobre el caso mas dificil de F12** (dos contactos que ya existian cada uno por separado y despues resultan tener el mismo telefono/email): en vez de fusionarlos automaticamente (el documento pide "sin merge automatico/destructivo"), el sistema detecta el choque al crear o editar un contacto y lo bloquea con un mensaje claro (`lib/actions/contacts.ts:findDuplicate`, corre con el service role para detectar duplicados en todo el workspace aunque el que esta editando no tenga scope para verlos), y se agrego una accion manual explicita para Owner/Admin (`linkContactChannel` + pantalla "Vincular con otro contacto" en la ficha) que mueve canales/notas/conversaciones al contacto elegido y deja el duplicado soft-deleted, con audit log de los dos lados.
+- `lib/actions/contacts.ts`: `createContact`, `updateContact`, `assignContact` (F11, solo Owner/Admin), `softDeleteContact` (F15, solo Owner/Admin), `linkContactChannel`, `searchContactsForLinking`.
+- `lib/actions/contact-notes.ts` (F13): crear/editar/borrar (soft) notas, con audit log.
+- `lib/actions/contact-tags.ts` y `lib/actions/custom-fields.ts`: agregar/quitar tags y editar valores de custom fields desde la ficha (no existia ninguna UI para esto en todo el proyecto, se construyo nueva; la definicion de tags/custom fields en si no se toco).
+- `lib/members.ts`: `listWorkspaceMembers`, mismo patron que ya usaba `/settings/team` para resolver nombre/email via `auth.admin` (RLS no deja leer `auth.users`).
+- `/dashboard/contacts`: reescrita con busqueda, filtros (tags, setter, vendedor, temperatura, canal) y paginacion de 25, todo en la URL (`searchParams`, no mas carga de 100 sin paginar). Boton "Nuevo contacto" y borrado (soft) solo para Admin/Owner.
+- `/dashboard/contacts/[contactId]`: reconstruida entera (F14): header con badge "no contactar" y temperatura, asignacion de setter/vendedor, seguimiento, redes, atribucion, conversaciones agrupadas por canal (con link que abre el hilo puntual en la bandeja), notas, tags, custom fields (edicion inline), historial (ultimos eventos del audit log) y boton Editar. De paso se corrigio un bug que ya estaba en el codigo viejo: la pantalla pedia una columna `field_type` que no existe en `custom_field_definitions` (la columna real es `type`).
+- `/dashboard/inbox`: ahora soporta `?conversation=<id>` para abrir un hilo puntual desde la ficha (no existia antes).
+- `/api/cron/purge-deleted` (F15): cron nuevo (mismo patron de auth que los otros, `CRON_SECRET`), agregado a `vercel.json` (una vez por dia). Borra en cascada lo que tiene `deleted_at` de mas de 30 dias: alcanza con borrar `contacts` de verdad (las FK `ON DELETE CASCADE` ya existentes se llevan notas, canales, conversaciones, mensajes, tags y custom fields) mas `conversations`/`contact_notes` borrados sueltos (sin borrar el contacto entero).
+- Tests nuevos: `lib/phone.test.ts`, `lib/attribution.test.ts`, `lib/cross-channel.test.ts`, mas casos nuevos en `lib/inbox-sync.test.ts` para el matching cross-canal.
+- `npm run build`, `npm test` (84/84) y `npm run lint` (0 errores) pasan.
+
+**Fuera de este bloque, a proposito:**
+- Filtros de inbox, templates de respuesta, deteccion automatica de "no contactar" e importacion CSV: eso es el Bloque 4 (F16-F19). El campo `do_not_contact` esta listo en la base y el badge se muestra si esta en `true`, pero el marcado automatico y el boton manual de marcar/revertir se construyen en el Bloque 4.
+- No se construyo pantalla para crear/editar las *definiciones* de custom fields (que campos existen y de que tipo): F14 pide editar los *valores*, no definir campos nuevos, y esa pantalla no existia en ningun lado del proyecto antes de este bloque. Si el workspace no definio ningun custom field, esa seccion de la ficha queda con su empty state.
+
+**Bugs encontrados y arreglados en la verificacion contra Supabase real (2026-09-25):**
+1. **"permission denied for table workspace_invites" al abrir un link de invitacion:** no era RLS, a `service_role` (el que usan webhooks, crons y paginas como la de aceptar invitacion) le faltaba el GRANT basico sobre esa tabla. La migracion `00017` se lo habia dado a `anon`/`authenticated` pero no a `service_role`. Migracion nueva: `00034_grant_service_role_privileges.sql`, que lo cubre para todas las tablas (presentes y futuras), no solo esa.
+2. **"new row violates row-level security policy for table contacts" al crear un contacto, incluso siendo Owner:** el `insert(...).select("id").single()` de `createContact` le pedia a Postgres que devuelva la fila recien creada (`RETURNING`), y esa devolucion vuelve a evaluar la policy de `SELECT` sobre la fila nueva. Esa segunda evaluacion fallaba en la base real por un motivo que no se pudo determinar del todo sin acceso directo (las policies y los GRANT estaban bien, confirmado con `pg_policies`). Se lo esquivo de raiz: el `id` del contacto ahora se genera en el codigo (`randomUUID()`) antes de guardar, y el insert no pide `RETURNING`; si Postgres no tira error, ya sabemos que se guardo bien y ya sabemos el id. Mismo arreglo aplicado a `createContactNote` por las dudas (mismo patron `insert + select`). Confirmado con el usuario que el scope de leads (Member solo ve sus contactos asignados) sigue intacto: esto no toco ninguna policy, solo como se confirma el guardado.
+3. Ademas, un Member que crea un contacto sin asignar quedaba, por el scope de leads, sin poder ver el mismo lo que acababa de crear (justo el mismo mecanismo del bug 2, via RETURNING). Se le asigna como setter automatico al crearlo si quien crea es Member (Owner/Admin lo dejan sin asignar).
+
+**UI ajustada durante la verificacion (feedback del usuario):**
+- Selector de pais en el formulario de contacto: pasa de un input de 2 letras a un `<select>` con nombres de paises en espanol.
+- Campo "Proximo seguimiento": reemplazado el `datetime-local` nativo (no mostraba un calendario visible en todos los navegadores) por un calendario propio con el estilo del sistema (`components/ui/date-time-field.tsx`), mas un selector de hora (manual o de una lista, no el dropdown de hora/minuto por separado que se probo primero).
+- Rol del usuario logueado agregado debajo del nombre del workspace en el dropdown de arriba a la izquierda del sidebar, y debajo del nombre del setter/vendedor en la tabla de `/dashboard/contacts`.
+- Conversaciones de la ficha agrupadas por canal (Instagram/WhatsApp), antes se listaban todas juntas.
+- Mensajes de progreso rotando en el boton de sincronizar conversaciones de la bandeja (antes decia "Syncing..." fijo mientras duraba, y puede tardar bastante).
+
+**Pendiente:**
+- Decidir si conviene agregar una fuente real de datos de atribucion (UTM/fbclid) antes de la Fase 3, ya que hoy ningun canal conectado la manda.
+- La causa exacta del bug 2 (por que fallaba la revision de RLS sobre el RETURNING) quedo sin resolver del todo; el arreglo la esquiva pero si aparece el mismo error en otro insert nuevo mas adelante (fuera de contacts/contact_notes), aplicar el mismo patron (id generado en el codigo, sin `.select()` despues del insert).
+
+**Como probarlo:**
+1. Correr las migraciones nuevas contra Supabase.
+2. `/dashboard/contacts`: crear un contacto nuevo con telefono (ej: `+5491123456789`), confirmar que aparece en la lista. Probar los filtros (tag, setter, vendedor, temperatura, canal) y que queden en la URL. Probar que buscar por telefono/email/username funciona.
+3. Mandar un mensaje de WhatsApp a un numero conectado con el mismo telefono del contacto que acabas de crear: tiene que vincularse automatico al mismo contacto (no crear uno nuevo), y verse un evento "Canal vinculado" en el Historial de la ficha.
+4. Intentar crear un contacto nuevo con un telefono o email que ya usa otro: tiene que bloquear la creacion con un mensaje y (si el que esta probando puede ver ese contacto) un link a el.
+5. En la ficha de un contacto: asignar setter y vendedor (con un usuario Owner/Admin), agregar una nota, agregar/quitar un tag, y si el workspace tiene algun custom field definido, editar su valor. Confirmar que "Historial de cambios" va sumando cada accion.
+6. Crear dos contactos de prueba con datos distintos y usar "Vincular con otro contacto" (Owner/Admin) para fusionarlos; confirmar que las conversaciones/notas del duplicado terminan bajo el contacto elegido y que el duplicado desaparece de la lista (soft-deleted).
+7. Eliminar un contacto (Owner/Admin) y confirmar que desaparece de la lista y de la busqueda.
+8. **Probar el scope con un usuario Member:** crear/invitar un segundo usuario como Member, asignarle un contacto como setter en OTRO usuario Owner, y confirmar que: (a) el Member solo ve en `/dashboard/contacts` los contactos donde es setter/vendedor; (b) no puede ver el boton "Eliminar" ni "Vincular con otro contacto" (son solo Owner/Admin); (c) no puede cambiar setter/vendedor (los selects se muestran de solo lectura); (d) si intenta crear un contacto con un telefono que ya usa un contacto que no puede ver, el mensaje de error NO revela cual es (dice que pida a un Admin que lo revise).
+9. Pegarle a `/api/cron/purge-deleted?key=<CRON_SECRET>` manualmente y confirmar que no rompe nada con la base vacia (no deberia borrar nada si no hay nada con mas de 30 dias de borrado).

@@ -15,37 +15,60 @@ type Conversation = Database["public"]["Tables"]["conversations"]["Row"] & {
 };
 type Message = Database["public"]["Tables"]["messages"]["Row"];
 
+const SYNC_MESSAGES = [
+  "Buscando conversaciones nuevas...",
+  "Revisando los canales conectados...",
+  "Esto puede tardar unos segundos...",
+  "Ya casi termina...",
+];
+
 export function InboxView({
   conversations,
   workspaceId,
+  initialConversationId,
 }: {
   conversations: Conversation[];
   workspaceId: string;
+  initialConversationId?: string | null;
 }) {
   const router = useRouter();
-  const [selected, setSelected] = useState<Conversation | null>(null);
+  const [selected, setSelected] = useState<Conversation | null>(
+    initialConversationId ? conversations.find((c) => c.id === initialConversationId) ?? null : null
+  );
   const [messages, setMessages] = useState<Message[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [showContactPanel, setShowContactPanel] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState(SYNC_MESSAGES[0]);
 
   // Imports conversations that already exist in Zernio (e.g. from before the
-  // webhook was registered), then refreshes the server-rendered list.
+  // webhook was registered), then refreshes the server-rendered list. Puede
+  // tardar bastante (recorre cada canal, varias paginas), asi que el mensaje
+  // va rotando para que no parezca que se trabo.
   async function handleSyncConversations() {
     setSyncing(true);
     setSyncError(null);
+    setSyncMessage(SYNC_MESSAGES[0]);
+
+    let step = 0;
+    const rotateMessages = setInterval(() => {
+      step = (step + 1) % SYNC_MESSAGES.length;
+      setSyncMessage(SYNC_MESSAGES[step]);
+    }, 2500);
+
     try {
       const res = await fetch("/api/v1/channels/sync", { method: "POST" });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setSyncError(data.error || "Sync failed");
+        setSyncError(data.error || "No se pudo sincronizar");
         return;
       }
       router.refresh();
     } catch {
-      setSyncError("Failed to sync. Check your connection.");
+      setSyncError("No se pudo sincronizar. Revisa tu conexion.");
     } finally {
+      clearInterval(rotateMessages);
       setSyncing(false);
     }
   }
@@ -127,11 +150,10 @@ export function InboxView({
             <div className="flex h-full flex-col items-center justify-center px-6 text-center">
               <MessageSquare className="h-10 w-10 text-muted-foreground/40" />
               <p className="mt-3 text-sm font-medium text-muted-foreground">
-                No conversations yet
+                Todavia no hay conversaciones
               </p>
               <p className="mt-1 max-w-xs text-xs text-muted-foreground/70">
-                If you already have conversations in Zernio, sync them to bring
-                them into your inbox.
+                Si ya tenes conversaciones en Zernio, sincronizalas para traerlas a la bandeja.
               </p>
               <button
                 onClick={handleSyncConversations}
@@ -139,7 +161,7 @@ export function InboxView({
                 className="mt-4 inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
               >
                 <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
-                {syncing ? "Syncing..." : "Sync conversations"}
+                {syncing ? syncMessage : "Sincronizar conversaciones"}
               </button>
               {syncError && (
                 <p className="mt-2 text-xs text-destructive">{syncError}</p>

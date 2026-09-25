@@ -1,7 +1,12 @@
 import { getWorkspace } from "@/lib/workspace";
 import { InboxView } from "./inbox-view";
 
-export default async function InboxPage() {
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ conversation?: string }>;
+}) {
+  const { conversation } = await searchParams;
   const { workspace, supabase } = await getWorkspace();
 
   const { data: conversations } = await supabase
@@ -15,6 +20,7 @@ export default async function InboxPage() {
     <InboxView
       conversations={conversations ?? []}
       workspaceId={workspace.id}
+      initialConversationId={conversation ?? null}
     />
   );
 }

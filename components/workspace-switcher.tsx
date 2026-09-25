@@ -20,9 +20,12 @@ function avatarUrl(seed: string, size = 28) {
 export function WorkspaceSwitcher({
   current,
   workspaces,
+  roleLabel,
 }: {
   current: { id: string; name: string };
   workspaces: WorkspaceItem[];
+  /** Rol del usuario logueado en este workspace, se muestra debajo del nombre. */
+  roleLabel?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -87,8 +90,13 @@ export function WorkspaceSwitcher({
           alt=""
           className="h-7 w-7 rounded-md"
         />
-        <span className="flex-1 truncate text-sm font-semibold text-sidebar-foreground">
-          {current.name}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-sidebar-foreground">
+            {current.name}
+          </span>
+          {roleLabel && (
+            <span className="block truncate text-xs text-sidebar-foreground/60">{roleLabel}</span>
+          )}
         </span>
         <ChevronDown
           className={cn(

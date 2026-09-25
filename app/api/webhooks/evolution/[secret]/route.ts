@@ -4,6 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { upsertContactForSender } from "@/lib/inbox-sync";
 import { messagePreview } from "@/lib/message-preview";
 import { sendEmail } from "@/lib/email/send-email";
+import { normalizeWhatsAppJidPhone } from "@/lib/phone";
 
 /**
  * POST /api/webhooks/evolution/[secret]
@@ -235,6 +236,15 @@ async function handleMessagesUpsert(
 
     const senderName = fromMe ? "WhatsApp" : raw.pushName || phone;
 
+    // Deteccion cross-canal (F12): el JID de Baileys ya trae el numero en
+    // formato E.164 sin el "+". Un telefono invalido (grupos raros, IDs que
+    // no son numero de verdad) simplemente no participa del match ni se
+    // guarda en los campos de telefono del contacto nuevo.
+    const normalizedPhone = normalizeWhatsAppJidPhone(phone);
+    const phoneFields = normalizedPhone.valid
+      ? { phone: normalizedPhone.normalized!, whatsapp_phone: normalizedPhone.normalized! }
+      : undefined;
+
     const contact = await upsertContactForSender({
       supabase,
       channel: { id: channel.id, workspace_id: channel.workspace_id },
@@ -242,6 +252,8 @@ async function handleMessagesUpsert(
       senderName,
       senderPicture: null,
       interactionAt: new Date().toISOString(),
+      matchIdentity: normalizedPhone.valid ? { phone: normalizedPhone.normalized } : undefined,
+      contactFields: phoneFields,
     });
 
     if (!contact) {

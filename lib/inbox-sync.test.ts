@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Zernio } from "./zernio-client";
-import { backfillInboxConversations } from "./inbox-sync";
+import { backfillInboxConversations, upsertContactForSender } from "./inbox-sync";
 
 interface CapturedRow {
   table: string;
@@ -20,6 +20,8 @@ function makeFakeSupabase(seed: {
   /** Contact ids that already have a conversations row on the channel, so the
    * ignoreDuplicates upsert conflicts and returns no inserted rows. */
   conversationContactIds?: string[];
+  /** contacts.phone -> contact id, used by the cross-channel match lookup. */
+  contactIdByPhone?: Record<string, string>;
 }) {
   const inserts: CapturedRow[] = [];
   const upserts: CapturedRow[] = [];
@@ -37,6 +39,13 @@ function makeFakeSupabase(seed: {
           filters[col] = val;
           return builder;
         },
+        is(col: string, val: unknown) {
+          filters[col] = val;
+          return builder;
+        },
+        limit() {
+          return builder;
+        },
         single() {
           if (table === "contact_channels") {
             const contactId =
@@ -45,6 +54,13 @@ function makeFakeSupabase(seed: {
               data: contactId ? { contact_id: contactId } : null,
               error: contactId ? null : { code: "PGRST116" },
             });
+          }
+          return Promise.resolve({ data: null, error: null });
+        },
+        maybeSingle() {
+          if (table === "contacts" && filters.phone) {
+            const contactId = seed.contactIdByPhone?.[filters.phone as string];
+            return Promise.resolve({ data: contactId ? { id: contactId } : null, error: null });
           }
           return Promise.resolve({ data: null, error: null });
         },
@@ -379,5 +395,63 @@ describe("backfillInboxConversations", () => {
 
     expect(res.imported).toBe(1);
     expect(fake.upserts[0].row).toMatchObject({ channel_id: "ch-1" });
+  });
+});
+
+describe("upsertContactForSender cross-channel matching (F12)", () => {
+  it("links to an existing contact found by phone instead of creating a duplicate", async () => {
+    const fake = makeFakeSupabase({ contactIdByPhone: { "+5491100000000": "contact-existing" } });
+
+    const result = await upsertContactForSender({
+      supabase: fake.client,
+      channel: { id: "ch-whatsapp", workspace_id: "ws-1" },
+      senderId: "5491100000000",
+      senderName: "Nuevo por WhatsApp",
+      senderPicture: null,
+      interactionAt: "2026-07-01T10:00:00.000Z",
+      matchIdentity: { phone: "+5491100000000" },
+      contactFields: { phone: "+5491100000000", whatsapp_phone: "+5491100000000" },
+    });
+
+    expect(result).toMatchObject({ contactId: "contact-existing", existed: true, linked: true });
+    expect(fake.inserts.filter((i) => i.table === "contacts")).toHaveLength(0);
+    expect(fake.inserts.filter((i) => i.table === "contact_channels")).toHaveLength(1);
+    expect(fake.inserts.filter((i) => i.table === "contact_channels")[0].row).toMatchObject({
+      contact_id: "contact-existing",
+      channel_id: "ch-whatsapp",
+    });
+    const auditInserts = fake.inserts.filter((i) => i.table === "audit_log");
+    expect(auditInserts).toHaveLength(1);
+    expect(auditInserts[0].row).toMatchObject({
+      entity_type: "contact",
+      entity_id: "contact-existing",
+      action: "linked",
+    });
+  });
+
+  it("creates a new contact stamped with contactFields when nothing matches", async () => {
+    const fake = makeFakeSupabase({});
+
+    const result = await upsertContactForSender({
+      supabase: fake.client,
+      channel: { id: "ch-whatsapp", workspace_id: "ws-1" },
+      senderId: "5491100000000",
+      senderName: "Contacto nuevo",
+      senderPicture: null,
+      interactionAt: "2026-07-01T10:00:00.000Z",
+      matchIdentity: { phone: "+5491100000000" },
+      contactFields: { phone: "+5491100000000", whatsapp_phone: "+5491100000000" },
+    });
+
+    expect(result).toMatchObject({ existed: false });
+    const contactInserts = fake.inserts.filter((i) => i.table === "contacts");
+    expect(contactInserts).toHaveLength(1);
+    expect(contactInserts[0].row).toMatchObject({
+      phone: "+5491100000000",
+      whatsapp_phone: "+5491100000000",
+    });
+    const auditInserts = fake.inserts.filter((i) => i.table === "audit_log");
+    expect(auditInserts).toHaveLength(1);
+    expect(auditInserts[0].row).toMatchObject({ action: "created" });
   });
 });
