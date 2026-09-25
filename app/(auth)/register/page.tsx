@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
+import { PasswordInput } from "@/components/ui/password-input";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -100,14 +101,12 @@ export default function RegisterPage() {
             >
               Password
             </label>
-            <input
+            <PasswordInput
               id="password"
-              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
-              className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
               placeholder="Min. 6 characters"
             />
           </div>

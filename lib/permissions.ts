@@ -7,3 +7,10 @@
 export function isOwnerOrAdmin(role: string | null | undefined): boolean {
   return role === "owner" || role === "admin";
 }
+
+/** Etiquetas en espanol para el rol, usadas en el sidebar y en Mi Perfil. */
+export const ROLE_LABELS: Record<string, string> = {
+  owner: "Dueño",
+  admin: "Administrador",
+  member: "Miembro",
+};

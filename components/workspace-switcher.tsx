@@ -107,7 +107,7 @@ export function WorkspaceSwitcher({
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-lg border border-border bg-popover p-1 shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 w-max min-w-full max-w-[320px] rounded-lg border border-border bg-popover p-1 shadow-lg">
           {/* Workspace list */}
           {workspaces.map((ws) => {
             const isActive = ws.id === current.id;
@@ -129,7 +129,7 @@ export function WorkspaceSwitcher({
                   alt=""
                   className="h-6 w-6 rounded"
                 />
-                <span className="flex-1 truncate text-left">{ws.name}</span>
+                <span className="flex-1 whitespace-normal wrap-break-word text-left">{ws.name}</span>
                 {isLoading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : isActive ? (

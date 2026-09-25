@@ -44,6 +44,25 @@ export default async function TeamPage() {
     .eq("status", "pending")
     .order("created_at", { ascending: false });
 
+  // Invitaciones fantasma: el email ya es miembro (paso previo a este fix
+  // no borraba la invitacion al re-invitar a alguien que ya habia aceptado).
+  // Se limpian solas al entrar a esta pantalla, en vez de requerir revocarlas
+  // a mano.
+  const memberEmails = new Set(
+    memberDetails.map((m) => m.email.toLowerCase())
+  );
+  const staleInviteIds = (pendingInvites ?? [])
+    .filter((invite) => memberEmails.has(invite.email.toLowerCase()))
+    .map((invite) => invite.id);
+
+  if (staleInviteIds.length > 0) {
+    await serviceClient.from("workspace_invites").delete().in("id", staleInviteIds);
+  }
+
+  const activeInvites = (pendingInvites ?? []).filter(
+    (invite) => !staleInviteIds.includes(invite.id)
+  );
+
   return (
     <TeamView
       workspaceId={workspace.id}
@@ -51,7 +70,7 @@ export default async function TeamPage() {
       currentUserId={user.id}
       currentUserRole={role}
       members={memberDetails}
-      pendingInvites={pendingInvites ?? []}
+      pendingInvites={activeInvites}
     />
   );
 }

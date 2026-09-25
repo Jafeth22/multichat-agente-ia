@@ -4,6 +4,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getWorkspace } from "@/lib/workspace";
 import { isOwnerOrAdmin } from "@/lib/permissions";
 import { sendEmail } from "@/lib/email/send-email";
+import { listWorkspaceMembers } from "@/lib/members";
 
 export async function inviteTeamMember(
   workspaceId: string,
@@ -38,26 +39,27 @@ export async function inviteTeamMember(
     return { error: "Invalid role. Must be member or admin." };
   }
 
-  // Check if this email is already a member
-  const { data: existingMembers } = await supabase
-    .from("workspace_members")
-    .select("user_id, workspaces!inner(id)")
-    .eq("workspace_id", workspaceId);
+  // Check if this email already belongs to an existing member (workspace_members
+  // solo guarda user_id, asi que resolvemos el email via listWorkspaceMembers).
+  const currentMembers = await listWorkspaceMembers(workspaceId);
+  const alreadyMember = currentMembers.some(
+    (m) => m.email.toLowerCase() === trimmedEmail
+  );
+  if (alreadyMember) {
+    return { error: "Este correo ya es miembro del equipo" };
+  }
 
-  if (existingMembers && existingMembers.length > 0) {
-    // We need to check auth.users for the email, but RLS won't let us.
-    // Instead, check if there's already a pending invite for this email.
-    const { data: existingInvite } = await supabase
-      .from("workspace_invites")
-      .select("id")
-      .eq("workspace_id", workspaceId)
-      .eq("email", trimmedEmail)
-      .eq("status", "pending")
-      .single();
+  // Check if there's already a pending invite for this email
+  const { data: existingInvite } = await supabase
+    .from("workspace_invites")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("email", trimmedEmail)
+    .eq("status", "pending")
+    .single();
 
-    if (existingInvite) {
-      return { error: "An invite for this email is already pending" };
-    }
+  if (existingInvite) {
+    return { error: "An invite for this email is already pending" };
   }
 
   const { data: invite, error: insertError } = await supabase
@@ -234,11 +236,8 @@ export async function acceptInvite(inviteId: string) {
     .single();
 
   if (existingMembership) {
-    // Already a member, just mark the invite as accepted
-    await serviceClient
-      .from("workspace_invites")
-      .update({ status: "accepted" })
-      .eq("id", inviteId);
+    // Ya es miembro (invite reconocida): recien confirmado esto se borra la invitacion.
+    await serviceClient.from("workspace_invites").delete().eq("id", inviteId);
 
     return { ok: true, workspaceId: invite.workspace_id, alreadyMember: true };
   }
@@ -256,11 +255,9 @@ export async function acceptInvite(inviteId: string) {
     return { error: insertError.message };
   }
 
-  // Update invite status to accepted
-  await serviceClient
-    .from("workspace_invites")
-    .update({ status: "accepted" })
-    .eq("id", inviteId);
+  // El alta se completo bien: recien ahi se borra la invitacion. Si el
+  // insert hubiera fallado, la invitacion queda intacta para reintentar.
+  await serviceClient.from("workspace_invites").delete().eq("id", inviteId);
 
   return { ok: true, workspaceId: invite.workspace_id };
 }
