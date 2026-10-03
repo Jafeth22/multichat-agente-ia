@@ -3,6 +3,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { createZernioClient } from "@/lib/zernio-client";
 import { readChannelSecret } from "@/lib/vault";
 import { messagePreview } from "@/lib/message-preview";
+import { normalizeAttachments } from "@/lib/message-attachments";
 import { logAuditEvent } from "@/lib/audit";
 
 /**
@@ -116,7 +117,7 @@ export async function GET(request: NextRequest) {
       conversation_id: conversationId,
       direction: m.direction === "outbound" ? "outbound" : "inbound",
       text: m.text ?? m.message ?? null,
-      attachments: m.attachments?.length ? m.attachments : null,
+      attachments: normalizeAttachments(m.attachments),
       quick_reply_payload: null,
       postback_payload: null,
       callback_data: null,

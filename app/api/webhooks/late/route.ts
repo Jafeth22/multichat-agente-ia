@@ -8,6 +8,7 @@ import { upsertContactForSender } from "@/lib/inbox-sync";
 import { processComment } from "@/lib/comment-processor";
 import type { Database } from "@/lib/types/database";
 import { messagePreview } from "@/lib/message-preview";
+import { attachmentPreviewText } from "@/lib/message-attachments";
 import { detectOptOutPhrase, markContactOptOut } from "@/lib/opt-out";
 
 // ── Zernio API webhook payload ───────────────────────────────────────────────
@@ -242,7 +243,7 @@ async function processMessageEvent(
 
   // ── Upsert conversation ──────────────────────────────────────────────────
 
-  const preview = messagePreview(msg.text);
+  const preview = messagePreview(msg.text || attachmentPreviewText(msg.attachments));
 
   const { data: conversation } = await supabase
     .from("conversations")

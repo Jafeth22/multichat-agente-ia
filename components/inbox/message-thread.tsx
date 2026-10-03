@@ -3,13 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Paperclip, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2, Circle, Ban, Trash2 } from "lucide-react";
+import { Send, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2, Circle, Ban, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PlatformIcon } from "@/components/platform-icon";
 import { interpolateTemplate } from "@/lib/templates";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { TemplatePicker } from "@/components/inbox/template-picker";
+import { MessageAttachments } from "@/components/inbox/message-attachments";
 import { softDeleteConversation, restoreConversation } from "@/lib/actions/conversations";
 import type { Database, ConversationStatus } from "@/lib/types/database";
 
@@ -105,12 +106,7 @@ function MessageBubble({ message }: { message: Message }) {
           )}
         >
           {message.text && <p className="whitespace-pre-wrap">{message.text}</p>}
-          {message.attachments && (
-            <div className="mt-1">
-              <Paperclip className="inline h-3 w-3" />
-              <span className="ml-1 text-xs opacity-70">Attachment</span>
-            </div>
-          )}
+          <MessageAttachments attachments={message.attachments} />
         </div>
         <div
           className={cn(
