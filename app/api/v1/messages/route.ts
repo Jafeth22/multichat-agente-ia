@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
     const messages = zernioMessages.map((m: any) => ({
       id: m.id,
       conversation_id: conversationId,
-      direction: m.direction === "outbound" ? "outbound" : "inbound",
+      direction: m.direction === "outgoing" || m.direction === "outbound" ? "outbound" : "inbound",
       text: m.text ?? m.message ?? null,
       attachments: normalizeAttachments(m.attachments),
       quick_reply_payload: null,

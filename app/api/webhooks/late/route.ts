@@ -243,6 +243,16 @@ async function processMessageEvent(
 
   // ── Upsert conversation ──────────────────────────────────────────────────
 
+  // Diagnostico temporal: ver que manda Zernio cuando el mensaje es un
+  // sticker, Reel u otro adjunto (aparece en los logs de Vercel).
+  if (!msg.text || msg.attachments?.length) {
+    console.log("[late-webhook] mensaje sin texto o con adjuntos", JSON.stringify({
+      text: msg.text,
+      attachments: msg.attachments,
+      raw: msg,
+    }).slice(0, 4000));
+  }
+
   const preview = messagePreview(msg.text || attachmentPreviewText(msg.attachments));
 
   const { data: conversation } = await supabase

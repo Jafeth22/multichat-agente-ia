@@ -107,6 +107,12 @@ function MessageBubble({ message }: { message: Message }) {
         >
           {message.text && <p className="whitespace-pre-wrap">{message.text}</p>}
           <MessageAttachments attachments={message.attachments} />
+          {!message.text &&
+            !(Array.isArray(message.attachments) && message.attachments.length > 0) && (
+              <p className="text-xs italic opacity-70">
+                Contenido que Instagram no entrega (sticker, Reel, reaccion u otro adjunto)
+              </p>
+            )}
         </div>
         <div
           className={cn(
