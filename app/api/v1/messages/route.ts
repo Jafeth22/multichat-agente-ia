@@ -100,7 +100,9 @@ export async function GET(request: NextRequest) {
     const zernio = createZernioClient(apiKey);
     const res = await zernio.messages.getInboxConversationMessages({
       path: { conversationId: conversation.late_conversation_id },
-      query: { accountId: channel.late_account_id },
+      // Por defecto Zernio devuelve los 100 mensajes MAS VIEJOS; pedimos
+      // los 100 mas nuevos y los damos vuelta abajo para mostrarlos en orden.
+      query: { accountId: channel.late_account_id, sortOrder: "desc", limit: 100 },
     });
 
     // The Zernio endpoint returns { success, messages: [...] } — NOT { data }.
@@ -130,6 +132,9 @@ export async function GET(request: NextRequest) {
       story_reply: m.storyReply ? { storyId: m.storyReply.storyId, storyUrl: m.storyReply.storyUrl ?? null } : null,
       is_story_mention: m.isStoryMention ?? false,
     }));
+
+    // Orden cronologico (viejo -> nuevo), sin depender del orden que devuelva Zernio.
+    messages.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
     return NextResponse.json(messages);
   } catch (error) {
