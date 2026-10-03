@@ -51,14 +51,34 @@ export async function softDeleteConversation(conversationId: string) {
 export async function restoreConversation(conversationId: string) {
   const { workspace, user, supabase } = await getWorkspace();
 
-  const { error } = await supabase
-    .from("conversations")
-    .update({ deleted_at: null })
-    .eq("id", conversationId);
-
-  if (error) return { error: error.message };
+  // La fila borrada ya no pasa la policy de SELECT/UPDATE del cliente con
+  // RLS (el UPDATE no matchea nada y falla en silencio). El scope se valida
+  // con can_see_conversation (security definer, no mira deleted_at) y el
+  // UPDATE va con el cliente de servicio.
+  // (la funcion no esta en los tipos generados de Supabase, de ahi el cast)
+  const { data: allowed } = await (
+    supabase as unknown as {
+      rpc: (
+        fn: string,
+        args: Record<string, unknown>
+      ) => Promise<{ data: boolean | null }>;
+    }
+  ).rpc("can_see_conversation", { p_conversation_id: conversationId });
+  if (!allowed) return { error: "Conversacion no encontrada" };
 
   const service = await createServiceClient();
+  const { data: restored, error } = await service
+    .from("conversations")
+    .update({ deleted_at: null })
+    .eq("id", conversationId)
+    .eq("workspace_id", workspace.id)
+    .select("id");
+
+  if (error) return { error: error.message };
+  if (!restored || restored.length === 0) {
+    return { error: "No se encontro la conversacion para restaurar" };
+  }
+
   await logAuditEvent({
     supabase: service,
     workspaceId: workspace.id,

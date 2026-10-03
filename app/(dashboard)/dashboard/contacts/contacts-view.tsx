@@ -11,11 +11,12 @@ import {
   Calendar,
   Plus,
   Trash2,
-  Loader2,
+  Pencil,
+  Eye,
   Ban,
   Upload,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toastUndo } from "@/components/ui/undo-toast";
 import { cn } from "@/lib/utils";
 import { softDeleteContact, restoreContact } from "@/lib/actions/contacts";
 import { isOwnerOrAdmin } from "@/lib/permissions";
@@ -23,6 +24,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ContactFormModal } from "@/components/contacts/contact-form-modal";
 import { CsvImportModal } from "@/components/contacts/csv-import-modal";
 import { SelectField } from "@/components/ui/select-field";
+import { ActionsMenu } from "@/components/ui/actions-menu";
 import type { Database, LeadTemperature } from "@/lib/types/database";
 import type { WorkspaceMemberOption } from "@/lib/members";
 
@@ -109,6 +111,7 @@ export function ContactsView({
   const [showCsvImport, setShowCsvImport] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingContact, setEditingContact] = useState<ContactWithTags | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function pushFilters(next: Partial<typeof filters> & { page?: number }) {
@@ -149,15 +152,10 @@ export function ContactsView({
     setConfirmDelete(null);
     if (result.error) return;
     router.refresh();
-    toast(`Contacto "${name}" eliminado`, {
-      duration: 5000,
-      action: {
-        label: "Deshacer",
-        onClick: async () => {
-          await restoreContact(id);
-          router.refresh();
-        },
-      },
+    toastUndo(`Contacto "${name}" eliminado`, async () => {
+      const result = await restoreContact(id);
+      router.refresh();
+      return result;
     });
   }
 
@@ -318,9 +316,7 @@ export function ContactsView({
                 <th className="px-4 py-3 text-xs font-medium uppercase text-muted-foreground">Vendedor</th>
                 <th className="px-4 py-3 text-xs font-medium uppercase text-muted-foreground">Temperatura</th>
                 <th className="px-4 py-3 text-xs font-medium uppercase text-muted-foreground">Ultimo contacto</th>
-                {canManage && (
-                  <th className="px-4 py-3 text-xs font-medium uppercase text-muted-foreground">Acciones</th>
-                )}
+                <th className="px-4 py-3 text-xs font-medium uppercase text-muted-foreground">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -449,24 +445,37 @@ export function ContactsView({
                         {formatDate(contact.last_interaction_at)}
                       </span>
                     </td>
-                    {canManage && (
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() =>
-                            setConfirmDelete({ id: contact.id, name: contact.display_name ?? "este contacto" })
-                          }
-                          disabled={deletingId === contact.id}
-                          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                          title="Eliminar contacto"
-                        >
-                          {deletingId === contact.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3.5 w-3.5" />
-                          )}
-                        </button>
-                      </td>
-                    )}
+                    <td className="px-4 py-3">
+                      <ActionsMenu
+                        loading={deletingId === contact.id}
+                        items={[
+                          {
+                            label: "Ver ficha",
+                            icon: <Eye className="h-3.5 w-3.5" />,
+                            href: `/dashboard/contacts/${contact.id}`,
+                          },
+                          {
+                            label: "Editar",
+                            icon: <Pencil className="h-3.5 w-3.5" />,
+                            onClick: () => setEditingContact(contact),
+                          },
+                          ...(canManage
+                            ? [
+                                {
+                                  label: "Eliminar",
+                                  icon: <Trash2 className="h-3.5 w-3.5" />,
+                                  destructive: true,
+                                  onClick: () =>
+                                    setConfirmDelete({
+                                      id: contact.id,
+                                      name: contact.display_name ?? "este contacto",
+                                    }),
+                                },
+                              ]
+                            : []),
+                        ]}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -501,6 +510,16 @@ export function ContactsView({
       )}
 
       {showNewContact && <ContactFormModal onClose={() => setShowNewContact(false)} />}
+
+      {editingContact && (
+        <ContactFormModal
+          initialValues={{ ...editingContact, display_name: editingContact.display_name ?? "" }}
+          onClose={() => {
+            setEditingContact(null);
+            router.refresh();
+          }}
+        />
+      )}
 
       {showCsvImport && (
         <CsvImportModal

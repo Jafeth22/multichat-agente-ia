@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+import { toastUndo } from "@/components/ui/undo-toast";
 import { Pencil, Link2, Trash2, Loader2, Ban } from "lucide-react";
 import { isOwnerOrAdmin } from "@/lib/permissions";
 import { softDeleteContact, restoreContact, revertContactOptOut } from "@/lib/actions/contacts";
@@ -38,12 +38,10 @@ export function ContactHeaderActions({
     const contactId = contact.id;
     const contactName = contact.display_name ?? "este contacto";
     router.push("/dashboard/contacts");
-    toast(`Contacto "${contactName}" eliminado`, {
-      duration: 5000,
-      action: {
-        label: "Deshacer",
-        onClick: () => restoreContact(contactId),
-      },
+    toastUndo(`Contacto "${contactName}" eliminado`, async () => {
+      const result = await restoreContact(contactId);
+      router.refresh();
+      return result;
     });
   }
 

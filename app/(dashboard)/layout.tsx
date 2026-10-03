@@ -43,7 +43,7 @@ export default async function DashboardLayout({
         notifications={notifications}
       />
       <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
-      <Toaster position="bottom-right" theme="system" richColors />
+      <Toaster position="bottom-right" theme="system" richColors closeButton />
     </div>
   );
 }

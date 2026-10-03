@@ -378,23 +378,31 @@ export async function softDeleteContact(contactId: string) {
  * de rol que softDeleteContact, ya que revierte esa misma accion.
  */
 export async function restoreContact(contactId: string) {
-  const { workspace, user, role, supabase } = await getWorkspace();
+  const { workspace, user, role } = await getWorkspace();
 
   if (!isOwnerOrAdmin(role)) {
     return { error: "Solo Owner o Admin pueden restaurar contactos" };
   }
 
-  const { error } = await supabase
+  // Cliente de servicio: igual que en softDeleteContact, con RLS el UPDATE
+  // sobre una fila ya borrada no matchea ninguna fila y falla en silencio.
+  // El permiso (Owner/Admin) se validó arriba.
+  const service = await createServiceClient();
+  const { data: restored, error } = await service
     .from("contacts")
     .update({ deleted_at: null })
-    .eq("id", contactId);
+    .eq("id", contactId)
+    .eq("workspace_id", workspace.id)
+    .select("id");
 
   if (error) {
     console.error("[contacts action] db error:", error);
     return { error: friendlyDbError(error) };
   }
+  if (!restored || restored.length === 0) {
+    return { error: "No se encontró el contacto para restaurar" };
+  }
 
-  const service = await createServiceClient();
   await logAuditEvent({
     supabase: service,
     workspaceId: workspace.id,

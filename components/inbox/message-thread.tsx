@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
+import { toastUndo } from "@/components/ui/undo-toast";
 import { Send, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2, Circle, Ban, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -195,15 +195,10 @@ export function MessageThread({
     if (result.error) return;
     onDeleted?.();
     router.refresh();
-    toast(`Conversacion con "${contactName}" eliminada`, {
-      duration: 5000,
-      action: {
-        label: "Deshacer",
-        onClick: async () => {
-          await restoreConversation(conversationId);
-          router.refresh();
-        },
-      },
+    toastUndo(`Conversacion con "${contactName}" eliminada`, async () => {
+      const result = await restoreConversation(conversationId);
+      router.refresh();
+      return result;
     });
   }
 
