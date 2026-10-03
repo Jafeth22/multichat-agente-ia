@@ -5,6 +5,7 @@ import { upsertContactForSender } from "@/lib/inbox-sync";
 import { messagePreview } from "@/lib/message-preview";
 import { sendEmail } from "@/lib/email/send-email";
 import { normalizeWhatsAppJidPhone } from "@/lib/phone";
+import { detectOptOutPhrase, markContactOptOut } from "@/lib/opt-out";
 
 /**
  * POST /api/webhooks/evolution/[secret]
@@ -309,5 +310,19 @@ async function handleMessagesUpsert(
       platform_message_id: platformMessageId,
       status: "sent",
     });
+
+    // F18: deteccion automatica de "no contactar" en mensajes entrantes.
+    if (!fromMe) {
+      const phrase = await detectOptOutPhrase(supabase, channel.workspace_id, finalText);
+      if (phrase) {
+        await markContactOptOut({
+          supabase,
+          workspaceId: channel.workspace_id,
+          contactId: contact.contactId,
+          reason: `auto: ${phrase}`,
+          performedBy: null,
+        });
+      }
+    }
   }
 }

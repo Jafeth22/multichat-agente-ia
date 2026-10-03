@@ -8,6 +8,7 @@ import { isOwnerOrAdmin } from "@/lib/permissions";
 import { normalizePhone } from "@/lib/phone";
 import { findContactMatch } from "@/lib/cross-channel";
 import { logAuditEvent, diffFields } from "@/lib/audit";
+import { revertContactOptOut as revertContactOptOutHelper } from "@/lib/opt-out";
 import type { CountryCode } from "libphonenumber-js";
 import type { Database, LeadTemperature } from "@/lib/types/database";
 
@@ -345,9 +346,47 @@ export async function softDeleteContact(contactId: string) {
     return { error: "Solo Owner o Admin pueden eliminar contactos" };
   }
 
-  const { error } = await supabase
+  // Cliente de servicio: con RLS el UPDATE falla porque la fila borrada ya
+  // no pasa la policy de SELECT. El permiso (Owner/Admin) se validó arriba.
+  const service = await createServiceClient();
+  const { error } = await service
     .from("contacts")
     .update({ deleted_at: new Date().toISOString() })
+    .eq("id", contactId)
+    .eq("workspace_id", workspace.id);
+
+  if (error) {
+    console.error("[contacts action] db error:", error);
+    return { error: friendlyDbError(error) };
+  }
+
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "contact",
+    entityId: contactId,
+    action: "deleted",
+    performedBy: user.id,
+  });
+
+  revalidatePath("/dashboard/contacts");
+  return { ok: true };
+}
+
+/**
+ * Reversion del soft delete (undo de 5 segundos, Bloque 4): mismo chequeo
+ * de rol que softDeleteContact, ya que revierte esa misma accion.
+ */
+export async function restoreContact(contactId: string) {
+  const { workspace, user, role, supabase } = await getWorkspace();
+
+  if (!isOwnerOrAdmin(role)) {
+    return { error: "Solo Owner o Admin pueden restaurar contactos" };
+  }
+
+  const { error } = await supabase
+    .from("contacts")
+    .update({ deleted_at: null })
     .eq("id", contactId);
 
   if (error) {
@@ -361,11 +400,36 @@ export async function softDeleteContact(contactId: string) {
     workspaceId: workspace.id,
     entityType: "contact",
     entityId: contactId,
-    action: "deleted",
+    action: "restored",
     performedBy: user.id,
   });
 
   revalidatePath("/dashboard/contacts");
+  return { ok: true };
+}
+
+/**
+ * Reversion manual del marcado de "no contactar" (F18): solo Owner/Admin.
+ * No reanuda las secuencias que quedaron pausadas por la deteccion
+ * automatica (ver lib/opt-out.ts:revertContactOptOut).
+ */
+export async function revertContactOptOut(contactId: string) {
+  const { workspace, user, role, supabase } = await getWorkspace();
+
+  if (!isOwnerOrAdmin(role)) {
+    return { error: "Solo Owner o Admin pueden revertir el marcado de no contactar" };
+  }
+
+  await revertContactOptOutHelper({
+    supabase,
+    workspaceId: workspace.id,
+    contactId,
+    performedBy: user.id,
+  });
+
+  revalidatePath(`/dashboard/contacts/${contactId}`);
+  revalidatePath("/dashboard/contacts");
+  revalidatePath("/dashboard/inbox");
   return { ok: true };
 }
 
@@ -427,12 +491,13 @@ export async function linkContactChannel(targetContactId: string, sourceContactI
     await supabase.from("conversations").update({ contact_id: targetContactId }).eq("id", conv.id);
   }
 
-  await supabase
+  const service = await createServiceClient();
+  await service
     .from("contacts")
     .update({ deleted_at: new Date().toISOString() })
-    .eq("id", sourceContactId);
+    .eq("id", sourceContactId)
+    .eq("workspace_id", workspace.id);
 
-  const service = await createServiceClient();
   await logAuditEvent({
     supabase: service,
     workspaceId: workspace.id,

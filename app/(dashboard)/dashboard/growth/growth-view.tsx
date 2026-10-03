@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, Json } from "@/lib/types/database";
 import { PLATFORM_LABELS } from "@/lib/platforms";
+import { SelectField } from "@/components/ui/select-field";
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
 type CommentLog = Database["public"]["Tables"]["comment_logs"]["Row"];
@@ -357,12 +358,12 @@ export function GrowthView({
                 <label className="text-xs font-medium text-muted-foreground">
                   Channel
                 </label>
-                <select
+                <SelectField
                   value={form.channelId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, channelId: e.target.value }))
+                  onChange={(v) =>
+                    setForm((f) => ({ ...f, channelId: v }))
                   }
-                  className="mt-1.5 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full"
                 >
                   {channels.map((ch) => (
                     <option key={ch.id} value={ch.id}>
@@ -370,7 +371,7 @@ export function GrowthView({
                       {PLATFORM_LABELS[ch.platform]})
                     </option>
                   ))}
-                </select>
+                </SelectField>
               </div>
 
               {/* Flow */}
@@ -378,19 +379,19 @@ export function GrowthView({
                 <label className="text-xs font-medium text-muted-foreground">
                   Response Flow
                 </label>
-                <select
+                <SelectField
                   value={form.flowId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, flowId: e.target.value }))
+                  onChange={(v) =>
+                    setForm((f) => ({ ...f, flowId: v }))
                   }
-                  className="mt-1.5 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full"
                 >
                   {flows.map((flow) => (
                     <option key={flow.id} value={flow.id}>
                       {flow.name}
                     </option>
                   ))}
-                </select>
+                </SelectField>
               </div>
 
               {/* Keywords */}
@@ -414,23 +415,23 @@ export function GrowthView({
                 <label className="text-xs font-medium text-muted-foreground">
                   Match Type
                 </label>
-                <select
+                <SelectField
                   value={form.matchType}
-                  onChange={(e) =>
+                  onChange={(v) =>
                     setForm((f) => ({
                       ...f,
-                      matchType: e.target.value as
+                      matchType: v as
                         | "exact"
                         | "contains"
                         | "startsWith",
                     }))
                   }
-                  className="mt-1.5 w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full"
                 >
                   <option value="contains">Contains</option>
                   <option value="exact">Exact match</option>
                   <option value="startsWith">Starts with</option>
-                </select>
+                </SelectField>
               </div>
 
               {/* Public reply text (optional) */}

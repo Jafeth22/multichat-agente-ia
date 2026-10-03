@@ -10,6 +10,7 @@ import {
   AI_PROVIDER_LABELS,
   type AiProvider,
 } from "@/lib/ai-providers";
+import { SelectField } from "@/components/ui/select-field";
 
 export function AiProviderCard({
   provider,
@@ -90,18 +91,18 @@ export function AiProviderCard({
           </button>
         </div>
 
-        <select
+        <SelectField
           value={model}
-          onChange={(e) => setModel(e.target.value)}
+          onChange={(v) => setModel(v)}
           disabled={saving}
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+          className="w-full"
         >
           {models.map((m) => (
             <option key={m} value={m}>
               {m}
             </option>
           ))}
-        </select>
+        </SelectField>
       </div>
 
       <div className="mt-3 flex items-center gap-3">

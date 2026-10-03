@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TriggerType } from "@/lib/types/database";
+import { SelectField } from "@/components/ui/select-field";
 
 interface Keyword {
   value: string;
@@ -132,19 +133,18 @@ export function TriggerPanel({ data: rawData, onChange }: TriggerPanelProps) {
                   <span className="flex-1 truncate text-sm text-foreground">
                     {keyword.value}
                   </span>
-                  <select
+                  <SelectField size="sm"
                     value={keyword.matchType}
-                    onChange={(e) =>
-                      updateKeywordMatchType(index, e.target.value as "exact" | "contains" | "startsWith")
+                    onChange={(v) =>
+                      updateKeywordMatchType(index, v as "exact" | "contains" | "startsWith")
                     }
-                    className="rounded border border-border bg-muted px-2 py-1 text-xs text-foreground"
                   >
                     {matchTypes.map((m) => (
                       <option key={m.value} value={m.value}>
                         {m.label}
                       </option>
                     ))}
-                  </select>
+                  </SelectField>
                   <button
                     type="button"
                     onClick={() => removeKeyword(index)}
@@ -172,17 +172,16 @@ export function TriggerPanel({ data: rawData, onChange }: TriggerPanelProps) {
               placeholder="Enter keyword..."
               className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
-            <select
+            <SelectField size="sm"
               value={newMatchType}
-              onChange={(e) => setNewMatchType(e.target.value as "exact" | "contains" | "startsWith")}
-              className="rounded-lg border border-border bg-card px-2 py-2 text-xs text-foreground focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              onChange={(v) => setNewMatchType(v as "exact" | "contains" | "startsWith")}
             >
               {matchTypes.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
                 </option>
               ))}
-            </select>
+            </SelectField>
             <button
               type="button"
               onClick={addKeyword}

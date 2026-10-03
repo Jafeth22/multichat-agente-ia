@@ -74,11 +74,12 @@ NO reescribir: auth + trigger de creacion de workspace, flow builder (17 nodos),
 - Snapshot de precios al momento de la transaccion (aplica desde Etapa 4).
 - Single-tenant: un solo workspace. No construir gestion multi-workspace.
 - Pantalla de integraciones en `/settings/integrations`.
+- Todos los dropdowns usan `components/ui/select-field.tsx` (mismo estilo en todo el sistema). Las fechas usan `DateField` (`components/ui/date-time-field.tsx`) y se muestran siempre como `dd/mm/yyyy`. No usar `<select>`, `<input type="date">` ni `datetime-local` nativos.
 - No construir nada que el documento de requerimientos marque como fuera de alcance o de fases siguientes.
 
 # Calidad de codigo (template-ready)
 
-- Cada cambio de base de datos va en una migracion SQL separada en `supabase/migrations/`, numerada (la siguiente libre es `00018_`), idempotente (IF NOT EXISTS, DO $$ ... $$).
+- Cada cambio de base de datos va en una migracion SQL separada en `supabase/migrations/`, numerada (la siguiente libre es `00040_`), idempotente (IF NOT EXISTS, DO $$ ... $$).
 - Mantener .env.example actualizado: cada variable nueva se agrega con comentario explicativo.
 - El sistema debe funcionar con base de datos vacia (empty states claros en todas las pantallas).
 - No commitear .env con valores reales, solo .env.example.

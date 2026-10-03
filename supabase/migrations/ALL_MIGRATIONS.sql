@@ -2291,3 +2291,193 @@ alter default privileges in schema public
 
 alter default privileges in schema public
   grant usage, select on sequences to service_role;
+
+-- ============================================================
+-- MIGRATION 35: RESPONSE TEMPLATES
+-- ============================================================
+-- ============================================================
+-- RESPONSE TEMPLATES (F17)
+-- ============================================================
+-- Templates de respuesta rapida por workspace, usados desde el
+-- selector "/" en el campo de respuesta de la bandeja.
+--
+-- deleted_at se suma desde el arranque (ya anticipado en el
+-- comentario de 00032_soft_delete.sql).
+--
+-- Scope: cualquier miembro del workspace puede ver y usar los
+-- templates (los necesita para responder), pero crear/editar/borrar
+-- es solo Owner/Admin (F17, tabla de seguridad 13b).
+-- ============================================================
+
+create table if not exists response_templates (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  name text not null,
+  content text not null,
+  shortcut text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'response_templates_name_not_empty'
+  ) then
+    alter table response_templates
+      add constraint response_templates_name_not_empty check (btrim(name) <> '');
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'response_templates_content_not_empty'
+  ) then
+    alter table response_templates
+      add constraint response_templates_content_not_empty check (btrim(content) <> '');
+  end if;
+end $$;
+
+create index if not exists idx_response_templates_workspace
+  on response_templates(workspace_id) where deleted_at is null;
+
+-- Evita dos shortcuts iguales activos en el mismo workspace: el
+-- selector "/" busca por shortcut y necesita que sea univoco para no
+-- tener que desempatar.
+create unique index if not exists idx_response_templates_workspace_shortcut
+  on response_templates(workspace_id, lower(shortcut))
+  where deleted_at is null and shortcut is not null;
+
+drop trigger if exists set_updated_at on response_templates;
+create trigger set_updated_at
+  before update on response_templates
+  for each row execute function update_updated_at();
+
+alter table response_templates enable row level security;
+
+drop policy if exists "Members select response_templates" on response_templates;
+create policy "Members select response_templates"
+  on response_templates for select
+  using (is_workspace_member(workspace_id) and deleted_at is null);
+
+drop policy if exists "Admins insert response_templates" on response_templates;
+create policy "Admins insert response_templates"
+  on response_templates for insert
+  with check (is_workspace_admin(workspace_id));
+
+-- Update cubre tanto editar el contenido como el soft delete
+-- (deleted_at = now()): solo Owner/Admin.
+drop policy if exists "Admins update response_templates" on response_templates;
+create policy "Admins update response_templates"
+  on response_templates for update
+  using (is_workspace_admin(workspace_id));
+
+-- Sin policy de delete para authenticated: siempre soft delete.
+grant select, insert, update on response_templates to authenticated;
+
+-- ============================================================
+-- MIGRATION 36: CSV IMPORTS
+-- ============================================================
+-- ============================================================
+-- CSV IMPORTS (F19)
+-- ============================================================
+-- Log append-only de cada importacion de contactos por CSV: resumen
+-- (importados/actualizados/errores) y detalle de errores por fila.
+-- No es una entidad de negocio editable, es un registro historico:
+-- sin soft delete, sin policy de update/delete para authenticated
+-- (igual criterio que audit_log, pero cualquier miembro puede
+-- insertar su propia importacion, no solo el service role).
+-- ============================================================
+
+create table if not exists csv_imports (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references workspaces(id) on delete cascade,
+  file_name text not null,
+  total_rows integer not null default 0,
+  imported integer not null default 0,
+  updated integer not null default 0,
+  errors integer not null default 0,
+  error_details jsonb,
+  imported_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_csv_imports_workspace
+  on csv_imports(workspace_id, created_at desc);
+
+alter table csv_imports enable row level security;
+
+drop policy if exists "Members select csv_imports" on csv_imports;
+create policy "Members select csv_imports"
+  on csv_imports for select
+  using (is_workspace_member(workspace_id));
+
+drop policy if exists "Members insert csv_imports" on csv_imports;
+create policy "Members insert csv_imports"
+  on csv_imports for insert
+  with check (is_workspace_member(workspace_id) and imported_by = auth.uid());
+
+-- Sin policy de update/delete para authenticated: es un registro
+-- historico inmutable una vez creado.
+grant select, insert on csv_imports to authenticated;
+
+-- ============================================================
+-- MIGRATION 37: WORKSPACES OPTOUT PHRASES
+-- ============================================================
+-- ============================================================
+-- FRASES DE "NO CONTACTAR" (F18)
+-- ============================================================
+-- Lista configurable por workspace de frases que, detectadas en un
+-- mensaje entrante, marcan al contacto como do_not_contact=true
+-- (columnas ya agregadas en 00029). Se guarda separada de
+-- global_keywords (que es un feature distinto: dispara flows por
+-- match exacto, ver app/api/webhooks/late/route.ts) porque el
+-- matching de opt-out es por substring, no exacto.
+--
+-- workspaces ya tiene RLS de update admin-only (00025), no hace
+-- falta ninguna policy nueva.
+-- ============================================================
+
+alter table workspaces
+  add column if not exists optout_phrases jsonb not null default
+    '["no me escribas más","dejá de mandar mensajes","no quiero recibir mensajes","stop","unsubscribe","basta","no me contactes"]'::jsonb;
+
+-- ============================================================
+-- MIGRATION 38: CONVERSATIONS FILTER INDEXES
+-- ============================================================
+-- ============================================================
+-- INDICES DE SOPORTE PARA FILTROS DE BANDEJA (F16) Y AUTO-ASIGNACION
+-- ============================================================
+-- conversations.assigned_to ya existe desde 00001 pero nada lo escribia
+-- hasta ahora (Bloque 4: auto-asignacion al responder + filtro "Sin
+-- asignar" / "asignado a X" del inbox). Sin cambios de RLS, solo
+-- indices para que esos filtros no escaneen toda la tabla.
+-- ============================================================
+
+create index if not exists idx_conversations_assigned_to
+  on conversations(assigned_to) where deleted_at is null;
+
+create index if not exists idx_conversations_workspace_last_message
+  on conversations(workspace_id, last_message_at desc) where deleted_at is null;
+
+-- ============================================================
+-- MIGRATION 39: RESPONSE TEMPLATES UPDATE POLICY FIX
+-- ============================================================
+-- ============================================================
+-- FIX: "new row violates row-level security policy for table
+-- response_templates" al eliminar (soft delete) un template.
+-- ============================================================
+-- La policy de UPDATE de 00035_response_templates.sql solo tenia
+-- USING, sin WITH CHECK explicito. Aca se reafirma con los dos
+-- (igual patron que "Scoped update on contacts" y "Author or admin
+-- updates contact_notes"), que es la convencion que sigue el resto
+-- del proyecto para evitar justo este tipo de problema.
+-- ============================================================
+
+drop policy if exists "Admins update response_templates" on response_templates;
+create policy "Admins update response_templates"
+  on response_templates for update
+  using (is_workspace_admin(workspace_id))
+  with check (is_workspace_admin(workspace_id));
+
+-- Confirma tambien el GRANT a nivel tabla (refuerzo idempotente y gratis).
+grant select, insert, update on response_templates to authenticated;

@@ -6,14 +6,17 @@ import { MessageSquare, RefreshCw, User } from "lucide-react";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactPanel } from "@/components/inbox/contact-panel";
+import { InboxFilters, type InboxFiltersState } from "@/components/inbox/inbox-filters";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Database } from "@/lib/types/database";
+import type { WorkspaceMemberOption } from "@/lib/members";
 
 type Conversation = Database["public"]["Tables"]["conversations"]["Row"] & {
   contacts: Database["public"]["Tables"]["contacts"]["Row"] | null;
 };
 type Message = Database["public"]["Tables"]["messages"]["Row"];
+type Tag = Database["public"]["Tables"]["tags"]["Row"];
 
 const SYNC_MESSAGES = [
   "Buscando conversaciones nuevas...",
@@ -26,10 +29,16 @@ export function InboxView({
   conversations,
   workspaceId,
   initialConversationId,
+  tags,
+  members,
+  filters,
 }: {
   conversations: Conversation[];
   workspaceId: string;
   initialConversationId?: string | null;
+  tags: Tag[];
+  members: WorkspaceMemberOption[];
+  filters: InboxFiltersState;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Conversation | null>(
@@ -121,13 +130,16 @@ export function InboxView({
   return (
     <div className="flex h-full">
       {/* Left panel: Conversation list */}
-      <div className="w-80 flex-shrink-0">
-        <ConversationList
-          conversations={conversations}
-          workspaceId={workspaceId}
-          selectedId={selected?.id ?? null}
-          onSelect={handleSelect}
-        />
+      <div className="flex w-80 flex-shrink-0 flex-col">
+        <InboxFilters tags={tags} members={members} filters={filters} />
+        <div className="min-h-0 flex-1">
+          <ConversationList
+            conversations={conversations}
+            workspaceId={workspaceId}
+            selectedId={selected?.id ?? null}
+            onSelect={handleSelect}
+          />
+        </div>
       </div>
 
       {/* Center panel: Message thread */}
@@ -175,6 +187,7 @@ export function InboxView({
             <MessageThread
               conversation={selected}
               messages={messages}
+              onDeleted={() => setSelected(null)}
             />
           )}
         </div>

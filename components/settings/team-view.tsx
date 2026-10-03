@@ -24,6 +24,7 @@ import {
 } from "@/lib/actions/team";
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { SelectField } from "@/components/ui/select-field";
 
 interface MemberDetail {
   userId: string;
@@ -219,17 +220,16 @@ export function TeamView({
                     {isOwnerOrAdmin &&
                     member.userId !== currentUserId &&
                     member.role !== "owner" ? (
-                      <select
+                      <SelectField
                         value={member.role}
-                        onChange={(e) =>
-                          handleRoleChange(member.userId, e.target.value)
+                        onChange={(v) =>
+                          handleRoleChange(member.userId, v)
                         }
                         disabled={changingRoleId === member.userId}
-                        className="rounded-full border border-input bg-background px-2 py-0.5 text-[10px] font-medium capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                       >
                         <option value="member">Member</option>
                         <option value="admin">Admin</option>
-                      </select>
+                      </SelectField>
                     ) : (
                       <span
                         className={cn(
@@ -302,14 +302,13 @@ export function TeamView({
                     required
                     className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                   />
-                  <select
+                  <SelectField
                     value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    className="rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    onChange={(v) => setInviteRole(v)}
                   >
                     <option value="member">Member</option>
                     <option value="admin">Admin</option>
-                  </select>
+                  </SelectField>
                   <button
                     type="submit"
                     disabled={!inviteEmail.trim() || inviting}

@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import {
   GitBranch,
   MessageSquare,
+  MessageSquareText,
   Users,
   Radio,
   ListOrdered,
@@ -47,6 +48,9 @@ const navigation = [
   { name: "Contacts", href: "/dashboard/contacts", icon: Users },
   { name: "Broadcasts", href: "/dashboard/broadcasts", icon: Radio },
   { name: "Sequences", href: "/dashboard/sequences", icon: ListOrdered },
+  // Visible a todos: Member usa los templates desde la bandeja aunque no
+  // pueda crearlos/editarlos (eso lo restringe la pantalla, no el link).
+  { name: "Templates", href: "/dashboard/settings/templates", icon: MessageSquareText },
   { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { name: "Growth", href: "/dashboard/growth", icon: Sprout },
   // Solo Owner/Admin gestionan integraciones y configuracion del workspace (F3).

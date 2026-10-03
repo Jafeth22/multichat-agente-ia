@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import { updateSequence, deleteSequence } from "@/lib/actions/sequences";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { SequenceStep } from "@/lib/types/database";
+import { SelectField } from "@/components/ui/select-field";
 
 interface SequenceEditorProps {
   sequence: {
@@ -384,18 +385,17 @@ function DelayPicker({
         }}
         className="w-20 rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       />
-      <select
+      <SelectField
         value={localUnit}
-        onChange={(e) => {
-          setLocalUnit(e.target.value as typeof localUnit);
-          handleChange(localValue, e.target.value);
+        onChange={(v) => {
+          setLocalUnit(v as typeof localUnit);
+          handleChange(localValue, v);
         }}
-        className="rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
       >
         <option value="minutes">Minutes</option>
         <option value="hours">Hours</option>
         <option value="days">Days</option>
-      </select>
+      </SelectField>
     </div>
   );
 }

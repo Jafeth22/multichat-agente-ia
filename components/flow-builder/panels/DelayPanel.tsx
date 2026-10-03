@@ -2,6 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
+import { SelectField } from "@/components/ui/select-field";
+import { DateField, TimeField } from "@/components/ui/date-time-field";
 
 type DelayUnit = "seconds" | "minutes" | "hours" | "days";
 type DelayMode = "duration" | "until";
@@ -112,19 +114,19 @@ export function DelayPanel({ data: rawData, onChange }: DelayPanelProps) {
                 }
                 className="w-24 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
               />
-              <select
+              <SelectField
                 value={unit}
-                onChange={(e) =>
-                  onChange({ ...data, unit: e.target.value as DelayUnit, waitUntil: undefined })
+                onChange={(v) =>
+                  onChange({ ...data, unit: v as DelayUnit, waitUntil: undefined })
                 }
-                className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                className="flex-1"
               >
                 {unitOptions.map((u) => (
                   <option key={u.value} value={u.value}>
                     {u.label}
                   </option>
                 ))}
-              </select>
+              </SelectField>
             </div>
           </div>
 
@@ -161,12 +163,24 @@ export function DelayPanel({ data: rawData, onChange }: DelayPanelProps) {
           <label className="mb-2 block text-xs font-semibold text-foreground">
             Wait until date/time
           </label>
-          <input
-            type="datetime-local"
-            value={data.waitUntil || ""}
-            onChange={(e) => onChange({ ...data, waitUntil: e.target.value })}
-            className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-purple-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
-          />
+          <div className="grid grid-cols-2 gap-2">
+            <DateField
+              value={(data.waitUntil || "").split("T")[0]}
+              onChange={(date) =>
+                onChange({
+                  ...data,
+                  waitUntil: date ? `${date}T${(data.waitUntil || "").split("T")[1] || "09:00"}` : "",
+                })
+              }
+            />
+            <TimeField
+              value={(data.waitUntil || "").split("T")[1] || ""}
+              disabled={!data.waitUntil}
+              onChange={(time) =>
+                onChange({ ...data, waitUntil: `${(data.waitUntil || "").split("T")[0]}T${time}` })
+              }
+            />
+          </div>
           <p className="mt-1.5 text-xs text-muted-foreground">
             The flow will pause until this specific date and time.
           </p>

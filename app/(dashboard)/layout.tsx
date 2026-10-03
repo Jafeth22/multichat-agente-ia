@@ -1,3 +1,4 @@
+import { Toaster } from "sonner";
 import { getWorkspace } from "@/lib/workspace";
 import { Sidebar } from "@/components/sidebar";
 
@@ -42,6 +43,7 @@ export default async function DashboardLayout({
         notifications={notifications}
       />
       <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      <Toaster position="bottom-right" theme="system" richColors />
     </div>
   );
 }

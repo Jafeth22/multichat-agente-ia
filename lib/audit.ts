@@ -16,7 +16,20 @@ export type AuditAction =
   | "link_suggested"
   | "note_created"
   | "note_updated"
-  | "note_deleted";
+  | "note_deleted"
+  | "opted_out"
+  | "opted_out_reverted"
+  | "csv_import"
+  | "invited"
+  | "role_changed"
+  | "removed"
+  | "channel_connected"
+  | "channel_disconnected"
+  | "channel_error"
+  | "settings_updated"
+  | "template_created"
+  | "template_updated"
+  | "template_deleted";
 
 export interface AuditFieldChange {
   old: unknown;

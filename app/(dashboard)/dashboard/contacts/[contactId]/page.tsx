@@ -45,6 +45,11 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   assigned: "Asignacion cambiada",
   linked: "Canal vinculado",
   link_suggested: "Vinculacion sugerida",
+  opted_out: "Marcado como no contactar",
+  opted_out_reverted: "Se revirtio el no contactar",
+  note_created: "Nota agregada",
+  note_updated: "Nota editada",
+  note_deleted: "Nota eliminada",
 };
 
 export default async function ContactDetailPage({
@@ -185,7 +190,7 @@ export default async function ContactDetailPage({
             </div>
           </div>
 
-          <ContactHeaderActions contact={contact} role={role} />
+          <ContactHeaderActions contact={contact} role={role} doNotContact={contact.do_not_contact} />
         </div>
       </div>
 

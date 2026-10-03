@@ -18,6 +18,11 @@ function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/** Formato unico de fecha del sistema: dd/mm/yyyy. */
+function formatDateDMY(d: Date): string {
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
 function parseDateKey(value: string): Date | null {
   if (!value) return null;
   const [y, m, d] = value.split("-").map(Number);
@@ -93,9 +98,7 @@ export function DateField({
       >
         <CalendarIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className={cn(!selected && "text-muted-foreground")}>
-          {selected
-            ? selected.toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" })
-            : placeholder}
+          {selected ? formatDateDMY(selected) : placeholder}
         </span>
       </button>
 

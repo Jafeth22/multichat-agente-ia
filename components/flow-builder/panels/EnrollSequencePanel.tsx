@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Loader2 } from "lucide-react";
+import { SelectField } from "@/components/ui/select-field";
 
 interface EnrollSequencePanelProps {
   data: Record<string, unknown>;
@@ -59,10 +60,10 @@ export function EnrollSequencePanel({ data, onChange }: EnrollSequencePanelProps
             No sequences found. Create one in the Sequences section first.
           </p>
         ) : (
-          <select
+          <SelectField
             value={(data.sequenceId as string) || ""}
-            onChange={(e) => onChange({ ...data, sequenceId: e.target.value })}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(v) => onChange({ ...data, sequenceId: v })}
+            className="w-full"
           >
             <option value="">Select a sequence...</option>
             {sequences.map((seq) => (
@@ -70,7 +71,7 @@ export function EnrollSequencePanel({ data, onChange }: EnrollSequencePanelProps
                 {seq.name} ({seq.status})
               </option>
             ))}
-          </select>
+          </SelectField>
         )}
         <p className="mt-1.5 text-xs text-muted-foreground">
           Only active sequences will actually enroll contacts at runtime.

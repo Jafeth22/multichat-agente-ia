@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { DateField } from "@/components/ui/date-time-field";
 
 // --- Types ---
 
@@ -443,20 +444,14 @@ export function AnalyticsView({
           <div className="mt-4 flex items-center gap-3">
             <div className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
-              <input
-                type="date"
-                value={customStart}
-                onChange={(e) => setCustomStart(e.target.value)}
-                className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
+              <div className="w-40">
+                <DateField value={customStart} onChange={setCustomStart} placeholder="Desde" />
+              </div>
             </div>
-            <span className="text-sm text-muted-foreground">to</span>
-            <input
-              type="date"
-              value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
-              className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            />
+            <span className="text-sm text-muted-foreground">a</span>
+            <div className="w-40">
+              <DateField value={customEnd} onChange={setCustomEnd} placeholder="Hasta" />
+            </div>
             <button
               onClick={fetchAnalytics}
               disabled={!customStart || !customEnd}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { assignContact } from "@/lib/actions/contacts";
 import type { WorkspaceMemberOption } from "@/lib/members";
+import { SelectField } from "@/components/ui/select-field";
 
 export function ContactAssignment({
   contactId,
@@ -63,10 +64,10 @@ export function ContactAssignment({
         <label className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
           Setter {saving === "setter" && <Loader2 className="h-3 w-3 animate-spin" />}
         </label>
-        <select
+        <SelectField
           value={setter}
-          onChange={(e) => handleChange("setter", e.target.value)}
-          className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          onChange={(v) => handleChange("setter", v)}
+          className="w-full"
         >
           <option value="">Sin asignar</option>
           {members.map((m) => (
@@ -74,16 +75,16 @@ export function ContactAssignment({
               {m.name}
             </option>
           ))}
-        </select>
+        </SelectField>
       </div>
       <div>
         <label className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
           Vendedor {saving === "vendedor" && <Loader2 className="h-3 w-3 animate-spin" />}
         </label>
-        <select
+        <SelectField
           value={vendedor}
-          onChange={(e) => handleChange("vendedor", e.target.value)}
-          className="w-full rounded-lg border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          onChange={(v) => handleChange("vendedor", v)}
+          className="w-full"
         >
           <option value="">Sin asignar</option>
           {members.map((m) => (
@@ -91,7 +92,7 @@ export function ContactAssignment({
               {m.name}
             </option>
           ))}
-        </select>
+        </SelectField>
       </div>
     </div>
   );

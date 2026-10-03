@@ -8,6 +8,7 @@ import { upsertContactForSender } from "@/lib/inbox-sync";
 import { processComment } from "@/lib/comment-processor";
 import type { Database } from "@/lib/types/database";
 import { messagePreview } from "@/lib/message-preview";
+import { detectOptOutPhrase, markContactOptOut } from "@/lib/opt-out";
 
 // ── Zernio API webhook payload ───────────────────────────────────────────────
 
@@ -277,6 +278,20 @@ async function processMessageEvent(
   }
 
   // Messages are stored by Zernio (source of truth) — no local insert needed.
+
+  // F18: deteccion automatica de "no contactar", independiente de si el
+  // automatismo del canal esta pausado (is_automation_paused solo afecta
+  // al flow engine, no a esta deteccion).
+  const optOutPhrase = await detectOptOutPhrase(supabase, channel.workspace_id, msg.text);
+  if (optOutPhrase) {
+    await markContactOptOut({
+      supabase,
+      workspaceId: channel.workspace_id,
+      contactId,
+      reason: `auto: ${optOutPhrase}`,
+      performedBy: null,
+    });
+  }
 
   // ── Flow engine ───────────────────────────────────────────────────────────
 

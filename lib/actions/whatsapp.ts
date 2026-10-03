@@ -4,6 +4,8 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { getWorkspace } from "@/lib/workspace";
 import { isOwnerOrAdmin } from "@/lib/permissions";
 import * as evolution from "@/lib/evolution-client";
+import { createServiceClient } from "@/lib/supabase/server";
+import { logAuditEvent } from "@/lib/audit";
 import type { Database } from "@/lib/types/database";
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
@@ -116,7 +118,7 @@ export async function refreshWhatsappQr(channelId: string) {
 export async function checkWhatsappConnectionState(
   channelId: string
 ): Promise<{ ok: true; channel: Channel } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
 
   const { data: channel } = await supabase
     .from("channels")
@@ -140,6 +142,16 @@ export async function checkWhatsappConnectionState(
       return { ok: true, channel };
     }
   } catch (err) {
+    const service = await createServiceClient();
+    await logAuditEvent({
+      supabase: service,
+      workspaceId: workspace.id,
+      entityType: "channel",
+      entityId: channelId,
+      action: "channel_error",
+      performedBy: user.id,
+      metadata: { platform: "whatsapp", error: err instanceof Error ? err.message : String(err) },
+    });
     return {
       error: err instanceof Error ? err.message : "No se pudo consultar el estado en Evolution API",
     };
@@ -158,12 +170,23 @@ export async function checkWhatsappConnectionState(
     .select("*")
     .single();
 
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "channel",
+    entityId: channelId,
+    action: "channel_connected",
+    performedBy: user.id,
+    metadata: { platform: "whatsapp" },
+  });
+
   return { ok: true, channel: updated ?? channel };
 }
 
 /** Desconecta manualmente (logout), la instancia queda lista para reconectar. */
 export async function disconnectWhatsappInstance(channelId: string) {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
 
   const { data: channel } = await supabase
     .from("channels")
@@ -193,6 +216,17 @@ export async function disconnectWhatsappInstance(channelId: string) {
       disconnected_at: new Date().toISOString(),
     })
     .eq("id", channelId);
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "channel",
+    entityId: channelId,
+    action: "channel_disconnected",
+    performedBy: user.id,
+    metadata: { platform: "whatsapp" },
+  });
 
   return { ok: true };
 }

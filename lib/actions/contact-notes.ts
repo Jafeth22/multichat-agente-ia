@@ -112,14 +112,17 @@ export async function deleteContactNote(noteId: string) {
     return { error: "Solo el autor, Admin u Owner pueden borrar esta nota" };
   }
 
-  const { error } = await supabase
+  // Cliente de servicio: con RLS el UPDATE falla porque la fila borrada ya
+  // no pasa la policy de SELECT. El permiso se validó arriba.
+  const service = await createServiceClient();
+  const { error } = await service
     .from("contact_notes")
     .update({ deleted_at: new Date().toISOString() })
-    .eq("id", noteId);
+    .eq("id", noteId)
+    .eq("workspace_id", workspace.id);
 
   if (error) return { error: error.message };
 
-  const service = await createServiceClient();
   await logAuditEvent({
     supabase: service,
     workspaceId: workspace.id,

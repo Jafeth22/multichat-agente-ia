@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NodeType } from "@/lib/types/database";
 import { EnrollSequencePanel } from "./EnrollSequencePanel";
+import { SelectField } from "@/components/ui/select-field";
 
 interface ActionPanelData {
   actionType?: NodeType;
@@ -178,16 +179,15 @@ function HttpRequestConfig({ data, onChange }: ActionSubPanelProps) {
           Request
         </label>
         <div className="flex gap-2">
-          <select
+          <SelectField
             value={data.method || "GET"}
-            onChange={(e) => onChange({ ...data, method: e.target.value })}
-            className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            onChange={(v) => onChange({ ...data, method: v })}
           >
             <option value="GET">GET</option>
             <option value="POST">POST</option>
             <option value="PUT">PUT</option>
             <option value="DELETE">DELETE</option>
-          </select>
+          </SelectField>
           <input
             type="url"
             value={data.url || ""}
@@ -554,15 +554,15 @@ function SmartDelayConfig({ data, onChange }: ActionSubPanelProps) {
             }
             className="w-24 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          <select
+          <SelectField
             value={data.timeoutUnit || "minutes"}
-            onChange={(e) => onChange({ ...data, timeoutUnit: e.target.value })}
-            className="flex-1 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
+            onChange={(v) => onChange({ ...data, timeoutUnit: v })}
+            className="flex-1"
           >
             <option value="minutes">Minutes</option>
             <option value="hours">Hours</option>
             <option value="days">Days</option>
-          </select>
+          </SelectField>
         </div>
         <p className="mt-1.5 text-xs text-muted-foreground">
           If the user does not respond within this time, the flow will continue.

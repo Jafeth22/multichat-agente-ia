@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SelectField } from "@/components/ui/select-field";
 
 interface Condition {
   field: string;
@@ -127,34 +128,34 @@ export function ConditionPanel({ data: rawData, onChange }: ConditionPanelProps)
 
               {/* Field */}
               <div className="space-y-2">
-                <select
+                <SelectField
                   value={condition.field}
-                  onChange={(e) =>
-                    updateCondition(index, { ...condition, field: e.target.value })
+                  onChange={(v) =>
+                    updateCondition(index, { ...condition, field: v })
                   }
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  className="w-full"
                 >
                   {fieldOptions.map((f) => (
                     <option key={f.value} value={f.value}>
                       {f.label}
                     </option>
                   ))}
-                </select>
+                </SelectField>
 
                 {/* Operator */}
-                <select
+                <SelectField
                   value={condition.operator}
-                  onChange={(e) =>
-                    updateCondition(index, { ...condition, operator: e.target.value })
+                  onChange={(v) =>
+                    updateCondition(index, { ...condition, operator: v })
                   }
-                  className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  className="w-full"
                 >
                   {operatorOptions.map((o) => (
                     <option key={o.value} value={o.value}>
                       {o.label}
                     </option>
                   ))}
-                </select>
+                </SelectField>
 
                 {/* Value (hidden for "exists" operator) */}
                 {condition.operator !== "exists" && (

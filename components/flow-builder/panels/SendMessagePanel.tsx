@@ -3,6 +3,7 @@
 import { useCallback, useRef } from "react";
 import { Plus, X, GripVertical, Image, Type, MousePointer, MessageCircle, LayoutGrid } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SelectField } from "@/components/ui/select-field";
 
 interface QuickReply {
   title: string;
@@ -341,20 +342,19 @@ function MessageEditor({
                 <label className="text-xs font-medium text-muted-foreground">Media URL</label>
               </div>
               <div className="flex gap-2">
-                <select
+                <SelectField
                   value={message.mediaType || "image"}
-                  onChange={(e) =>
+                  onChange={(v) =>
                     onChange({
                       ...message,
-                      mediaType: e.target.value as "image" | "video" | "audio",
+                      mediaType: v as "image" | "video" | "audio",
                     })
                   }
-                  className="rounded-lg border border-border bg-card px-2 py-2 text-sm text-foreground focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="image">Image</option>
                   <option value="video">Video</option>
                   <option value="audio">Audio</option>
-                </select>
+                </SelectField>
                 <input
                   type="url"
                   value={message.mediaUrl ?? message.imageUrl ?? ""}
@@ -461,10 +461,10 @@ function MessageEditor({
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
-                    <select
+                    <SelectField size="sm"
                       value={btn.type}
-                      onChange={(e) => {
-                        const type = e.target.value as "postback" | "url";
+                      onChange={(v) => {
+                        const type = v as "postback" | "url";
                         updateButton(i, {
                           ...btn,
                           type,
@@ -472,11 +472,10 @@ function MessageEditor({
                           url: type === "url" ? btn.url || "" : undefined,
                         });
                       }}
-                      className="rounded border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                     >
                       <option value="postback">Postback</option>
                       <option value="url">URL</option>
-                    </select>
+                    </SelectField>
                     {btn.type === "postback" ? (
                       <input
                         type="text"
@@ -726,10 +725,10 @@ function CarouselCardEditor({
                 </button>
               </div>
               <div className="flex items-center gap-1.5">
-                <select
+                <SelectField
                   value={btn.type}
-                  onChange={(e) => {
-                    const type = e.target.value as "postback" | "url";
+                  onChange={(v) => {
+                    const type = v as "postback" | "url";
                     updateButton(i, {
                       ...btn,
                       type,
@@ -738,11 +737,10 @@ function CarouselCardEditor({
                       url: type === "url" ? btn.url || "" : undefined,
                     });
                   }}
-                  className="rounded border border-border bg-card px-1.5 py-1 text-[11px] text-foreground focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="postback">Postback</option>
                   <option value="url">URL</option>
-                </select>
+                </SelectField>
                 {btn.type === "postback" ? (
                   <input
                     type="text"

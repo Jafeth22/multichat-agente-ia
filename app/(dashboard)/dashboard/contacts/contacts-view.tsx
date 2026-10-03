@@ -13,12 +13,16 @@ import {
   Trash2,
   Loader2,
   Ban,
+  Upload,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { softDeleteContact } from "@/lib/actions/contacts";
+import { softDeleteContact, restoreContact } from "@/lib/actions/contacts";
 import { isOwnerOrAdmin } from "@/lib/permissions";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ContactFormModal } from "@/components/contacts/contact-form-modal";
+import { CsvImportModal } from "@/components/contacts/csv-import-modal";
+import { SelectField } from "@/components/ui/select-field";
 import type { Database, LeadTemperature } from "@/lib/types/database";
 import type { WorkspaceMemberOption } from "@/lib/members";
 
@@ -102,6 +106,7 @@ export function ContactsView({
 
   const [search, setSearch] = useState(filters.search);
   const [showNewContact, setShowNewContact] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -137,11 +142,23 @@ export function ContactsView({
 
   async function handleDelete() {
     if (!confirmDelete) return;
-    setDeletingId(confirmDelete.id);
-    const result = await softDeleteContact(confirmDelete.id);
+    const { id, name } = confirmDelete;
+    setDeletingId(id);
+    const result = await softDeleteContact(id);
     setDeletingId(null);
     setConfirmDelete(null);
-    if (!result.error) router.refresh();
+    if (result.error) return;
+    router.refresh();
+    toast(`Contacto "${name}" eliminado`, {
+      duration: 5000,
+      action: {
+        label: "Deshacer",
+        onClick: async () => {
+          await restoreContact(id);
+          router.refresh();
+        },
+      },
+    });
   }
 
   const activeFilterCount = [
@@ -165,13 +182,22 @@ export function ContactsView({
               {totalCount} contacto{totalCount !== 1 ? "s" : ""} en el workspace
             </p>
           </div>
-          <button
-            onClick={() => setShowNewContact(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-          >
-            <Plus className="h-4 w-4" />
-            Nuevo contacto
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowCsvImport(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-accent"
+            >
+              <Upload className="h-4 w-4" />
+              Importar CSV
+            </button>
+            <button
+              onClick={() => setShowNewContact(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+            >
+              <Plus className="h-4 w-4" />
+              Nuevo contacto
+            </button>
+          </div>
         </div>
 
         {/* Busqueda y filtros */}
@@ -187,52 +213,36 @@ export function ContactsView({
             />
           </div>
 
-          <select
-            value={filters.setterId}
-            onChange={(e) => pushFilters({ setterId: e.target.value })}
-            className="rounded-lg border border-input bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
+          <SelectField value={filters.setterId} onChange={(v) => pushFilters({ setterId: v })}>
             <option value="">Setter: todos</option>
             {members.map((m) => (
               <option key={m.userId} value={m.userId}>
                 {m.name}
               </option>
             ))}
-          </select>
+          </SelectField>
 
-          <select
-            value={filters.vendedorId}
-            onChange={(e) => pushFilters({ vendedorId: e.target.value })}
-            className="rounded-lg border border-input bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
+          <SelectField value={filters.vendedorId} onChange={(v) => pushFilters({ vendedorId: v })}>
             <option value="">Vendedor: todos</option>
             {members.map((m) => (
               <option key={m.userId} value={m.userId}>
                 {m.name}
               </option>
             ))}
-          </select>
+          </SelectField>
 
-          <select
-            value={filters.temperature}
-            onChange={(e) => pushFilters({ temperature: e.target.value })}
-            className="rounded-lg border border-input bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
+          <SelectField value={filters.temperature} onChange={(v) => pushFilters({ temperature: v })}>
             <option value="">Temperatura: todas</option>
             <option value="cold">Frio</option>
             <option value="warm">Tibio</option>
             <option value="hot">Caliente</option>
-          </select>
+          </SelectField>
 
-          <select
-            value={filters.platform}
-            onChange={(e) => pushFilters({ platform: e.target.value })}
-            className="rounded-lg border border-input bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          >
+          <SelectField value={filters.platform} onChange={(v) => pushFilters({ platform: v })}>
             <option value="">Canal: todos</option>
             <option value="instagram">Instagram</option>
             <option value="whatsapp">WhatsApp</option>
-          </select>
+          </SelectField>
 
           {activeFilterCount > 0 && (
             <button
@@ -491,6 +501,17 @@ export function ContactsView({
       )}
 
       {showNewContact && <ContactFormModal onClose={() => setShowNewContact(false)} />}
+
+      {showCsvImport && (
+        <CsvImportModal
+          tags={tags}
+          members={members}
+          onClose={() => {
+            setShowCsvImport(false);
+            router.refresh();
+          }}
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirmDelete}

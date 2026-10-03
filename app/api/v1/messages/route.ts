@@ -1,8 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { createZernioClient } from "@/lib/zernio-client";
 import { readChannelSecret } from "@/lib/vault";
 import { messagePreview } from "@/lib/message-preview";
+import { logAuditEvent } from "@/lib/audit";
+
+/**
+ * Auto-asignacion al responder: la conversacion pasa a estar asignada a
+ * quien contesta, pero solo si no tenia a nadie asignado todavia (no le
+ * "roba" la conversacion a un setter/vendedor que ya la tenia asignada).
+ */
+async function autoAssignIfUnassigned(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  workspaceId: string,
+  conversationId: string,
+  assignedTo: string | null,
+  userId: string
+) {
+  if (assignedTo) return;
+
+  await supabase.from("conversations").update({ assigned_to: userId }).eq("id", conversationId);
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId,
+    entityType: "conversation",
+    entityId: conversationId,
+    action: "assigned",
+    performedBy: userId,
+    changes: { assigned_to: { old: null, new: userId } },
+    metadata: { trigger: "auto_on_reply" },
+  });
+}
 
 /**
  * GET /api/v1/messages?conversationId=...
@@ -190,6 +220,14 @@ export async function POST(request: NextRequest) {
       })
       .eq("id", conversationId);
 
+    await autoAssignIfUnassigned(
+      supabase,
+      conversation.workspace_id,
+      conversationId,
+      conversation.assigned_to,
+      user.id
+    );
+
     // Return a message-shaped response for the UI's optimistic update
     return NextResponse.json(
       {
@@ -222,7 +260,13 @@ export async function POST(request: NextRequest) {
 async function sendWhatsappMessage(
   supabase: Awaited<ReturnType<typeof createClient>>,
   userId: string,
-  conversation: { id: string; channel_id: string; contact_id: string | null },
+  conversation: {
+    id: string;
+    channel_id: string;
+    contact_id: string | null;
+    workspace_id: string;
+    assigned_to: string | null;
+  },
   channelInfo: { evolution_instance_name: string | null },
   text: string
 ) {
@@ -273,6 +317,14 @@ async function sendWhatsappMessage(
         last_message_preview: messagePreview(text),
       })
       .eq("id", conversation.id);
+
+    await autoAssignIfUnassigned(
+      supabase,
+      conversation.workspace_id,
+      conversation.id,
+      conversation.assigned_to,
+      userId
+    );
 
     return NextResponse.json(message, { status: 201 });
   } catch (error) {

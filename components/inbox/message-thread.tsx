@@ -2,11 +2,18 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Paperclip, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2, Circle } from "lucide-react";
+import { toast } from "sonner";
+import { Send, Paperclip, Bot, User, MessageSquare, CheckCircle, Clock, RotateCcw, Loader2, Circle, Ban, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PlatformIcon } from "@/components/platform-icon";
+import { interpolateTemplate } from "@/lib/templates";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { TemplatePicker } from "@/components/inbox/template-picker";
+import { softDeleteConversation, restoreConversation } from "@/lib/actions/conversations";
 import type { Database, ConversationStatus } from "@/lib/types/database";
+
+type ResponseTemplate = Database["public"]["Tables"]["response_templates"]["Row"];
 
 // story_reply/is_story_mention: Instagram-only, no llegan de la tabla
 // messages local (Zernio es la fuente de verdad) sino del endpoint
@@ -144,9 +151,11 @@ function MessageBubble({ message }: { message: Message }) {
 export function MessageThread({
   conversation,
   messages: initialMessages,
+  onDeleted,
 }: {
   conversation: Conversation | null;
   messages: Message[];
+  onDeleted?: () => void;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -156,6 +165,45 @@ export function MessageThread({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Selector de templates con "/" (F17): se cargan una sola vez por
+  // conversacion, la primera vez que el usuario escribe "/".
+  const [templates, setTemplates] = useState<ResponseTemplate[] | null>(null);
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templateQuery, setTemplateQuery] = useState("");
+  const [templateHighlight, setTemplateHighlight] = useState(0);
+
+  // Advertencia de "no contactar" (F18): no bloquea el envio, solo pide
+  // confirmar.
+  const [showOptOutConfirm, setShowOptOutConfirm] = useState(false);
+
+  // Eliminar conversacion (Bloque 4): confirmar y despues undo de 5s.
+  const [confirmDeleteConversation, setConfirmDeleteConversation] = useState(false);
+  const [deletingConversation, setDeletingConversation] = useState(false);
+
+  async function handleDeleteConversation() {
+    if (!conversation) return;
+    const conversationId = conversation.id;
+    const contactName = conversation.contacts?.display_name ?? "esta conversacion";
+    setDeletingConversation(true);
+    const result = await softDeleteConversation(conversationId);
+    setDeletingConversation(false);
+    setConfirmDeleteConversation(false);
+    if (result.error) return;
+    onDeleted?.();
+    router.refresh();
+    toast(`Conversacion con "${contactName}" eliminada`, {
+      duration: 5000,
+      action: {
+        label: "Deshacer",
+        onClick: async () => {
+          await restoreConversation(conversationId);
+          router.refresh();
+        },
+      },
+    });
+  }
 
   const updateConversationStatus = useCallback(async (status: ConversationStatus) => {
     if (!conversation || statusUpdating) return;
@@ -230,7 +278,71 @@ export function MessageThread({
     };
   }, [conversation?.id]);
 
-  async function handleSend() {
+  const loadTemplates = useCallback(async () => {
+    if (!conversation) return;
+    const supabase = createClient();
+    const [{ data: tpls }, { data: ws }] = await Promise.all([
+      supabase
+        .from("response_templates")
+        .select("*")
+        .eq("workspace_id", conversation.workspace_id)
+        .is("deleted_at", null)
+        .order("name"),
+      supabase.from("workspaces").select("name").eq("id", conversation.workspace_id).single(),
+    ]);
+    setTemplates(tpls ?? []);
+    setWorkspaceName(ws?.name ?? "");
+  }, [conversation]);
+
+  const filteredTemplates = (templates ?? []).filter((t) => {
+    if (!templateQuery) return true;
+    const q = templateQuery.toLowerCase();
+    return t.name.toLowerCase().includes(q) || (t.shortcut ?? "").toLowerCase().includes(q);
+  });
+
+  function handleInputChange(value: string) {
+    setInput(value);
+    autoResize();
+    // Solo dispara si "/" es lo unico escrito hasta ahora (sin espacios):
+    // el selector reemplaza el mensaje entero, no inserta texto inline.
+    const match = /^\/(\S*)$/.exec(value);
+    if (match) {
+      setTemplateQuery(match[1]);
+      setTemplateHighlight(0);
+      setShowTemplatePicker(true);
+      if (templates === null) loadTemplates();
+    } else {
+      setShowTemplatePicker(false);
+    }
+  }
+
+  function selectTemplate(template: ResponseTemplate) {
+    const interpolated = interpolateTemplate(template.content, {
+      contact: {
+        display_name: conversation?.contacts?.display_name ?? null,
+        email: conversation?.contacts?.email ?? null,
+        phone: conversation?.contacts?.phone ?? null,
+      },
+      workspace: { name: workspaceName },
+    });
+    setInput(interpolated);
+    setShowTemplatePicker(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      autoResize();
+    });
+  }
+
+  function handleSend() {
+    if (!input.trim() || !conversation || sending) return;
+    if (conversation.contacts?.do_not_contact) {
+      setShowOptOutConfirm(true);
+      return;
+    }
+    sendMessage();
+  }
+
+  async function sendMessage() {
     if (!input.trim() || !conversation || sending) return;
 
     const text = input.trim();
@@ -328,8 +440,17 @@ export function MessageThread({
             </div>
           </div>
           <div>
-            <p className="text-sm font-medium">
+            <p className="flex items-center gap-1.5 text-sm font-medium">
               {conversation.contacts?.display_name ?? "Unknown"}
+              {conversation.contacts?.do_not_contact && (
+                <span
+                  title="No contactar"
+                  className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+                >
+                  <Ban className="h-2.5 w-2.5" />
+                  No contactar
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -386,6 +507,15 @@ export function MessageThread({
                 {statusUpdating === "open" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
               </button>
             )}
+            <button
+              onClick={() => setConfirmDeleteConversation(true)}
+              disabled={deletingConversation}
+              title="Eliminar conversacion"
+              aria-label="Eliminar conversacion"
+              className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+            >
+              {deletingConversation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            </button>
           </div>
         </div>
       </div>
@@ -413,22 +543,50 @@ export function MessageThread({
 
       {/* Composer */}
       <div className="border-t border-border p-4">
-        <div className="mx-auto flex max-w-2xl items-end gap-2">
+        <div className="relative mx-auto flex max-w-2xl items-end gap-2">
+          {showTemplatePicker && (
+            <TemplatePicker
+              templates={filteredTemplates}
+              loading={templates === null}
+              highlight={templateHighlight}
+              onSelect={selectTemplate}
+              onClose={() => setShowTemplatePicker(false)}
+            />
+          )}
           <div className="flex-1">
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                autoResize();
-              }}
+              onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={(e) => {
+                if (showTemplatePicker && filteredTemplates.length > 0) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setTemplateHighlight((i) => (i + 1) % filteredTemplates.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setTemplateHighlight((i) => (i - 1 + filteredTemplates.length) % filteredTemplates.length);
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    selectTemplate(filteredTemplates[templateHighlight]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setShowTemplatePicker(false);
+                    return;
+                  }
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
-              placeholder="Type a message..."
+              placeholder='Escribi un mensaje... ("/" para usar un template)'
               rows={1}
               className="w-full resize-none rounded-lg border border-input bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               style={{ maxHeight: 150 }}
@@ -449,6 +607,31 @@ export function MessageThread({
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showOptOutConfirm}
+        title='Contacto marcado como "no contactar"'
+        message="Este contacto pidio no ser contactado. Queres enviar el mensaje igual?"
+        confirmLabel="Enviar igual"
+        cancelLabel="Cancelar"
+        destructive
+        onConfirm={() => {
+          setShowOptOutConfirm(false);
+          sendMessage();
+        }}
+        onCancel={() => setShowOptOutConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteConversation}
+        title="Eliminar conversacion"
+        message="Seguro que queres eliminar esta conversacion? Podes deshacerlo desde el aviso que aparece despues, por unos segundos."
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        destructive
+        onConfirm={handleDeleteConversation}
+        onCancel={() => setConfirmDeleteConversation(false)}
+      />
     </div>
   );
 }

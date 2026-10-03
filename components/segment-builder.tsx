@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/types/database";
 import { PLATFORMS, PLATFORM_LABELS } from "@/lib/platforms";
+import { SelectField } from "@/components/ui/select-field";
+import { DateField } from "@/components/ui/date-time-field";
 
 type Tag = Database["public"]["Tables"]["tags"]["Row"];
 type CustomFieldDef =
@@ -201,10 +203,9 @@ function FilterRuleRow({
     switch (config.valueType) {
       case "tag":
         return (
-          <select
+          <SelectField
             value={rule.value}
-            onChange={(e) => onChange({ ...rule, value: e.target.value })}
-            className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(v) => onChange({ ...rule, value: v })}
           >
             <option value="">Select tag...</option>
             {tags.map((tag) => (
@@ -212,19 +213,18 @@ function FilterRuleRow({
                 {tag.name}
               </option>
             ))}
-          </select>
+          </SelectField>
         );
       case "custom_field":
         return (
           <div className="flex items-center gap-2">
-            <select
+            <SelectField
               value={rule.value.split("::")[0] || ""}
-              onChange={(e) => {
-                const fieldSlug = e.target.value;
+              onChange={(v) => {
+                const fieldSlug = v;
                 const existingVal = rule.value.split("::")[1] || "";
                 onChange({ ...rule, value: `${fieldSlug}::${existingVal}` });
               }}
-              className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">Select field...</option>
               {customFields.map((cf) => (
@@ -232,7 +232,7 @@ function FilterRuleRow({
                   {cf.name}
                 </option>
               ))}
-            </select>
+            </SelectField>
             <input
               type="text"
               placeholder="Value..."
@@ -247,10 +247,9 @@ function FilterRuleRow({
         );
       case "platform":
         return (
-          <select
+          <SelectField
             value={rule.value}
-            onChange={(e) => onChange({ ...rule, value: e.target.value })}
-            className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(v) => onChange({ ...rule, value: v })}
           >
             <option value="">Select platform...</option>
             {PLATFORMS.map((p) => (
@@ -258,28 +257,24 @@ function FilterRuleRow({
                 {PLATFORM_LABELS[p]}
               </option>
             ))}
-          </select>
+          </SelectField>
         );
       case "boolean":
         return (
-          <select
+          <SelectField
             value={rule.value}
-            onChange={(e) => onChange({ ...rule, value: e.target.value })}
-            className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            onChange={(v) => onChange({ ...rule, value: v })}
           >
             <option value="">Select...</option>
             <option value="true">Yes</option>
             <option value="false">No</option>
-          </select>
+          </SelectField>
         );
       case "date":
         return (
-          <input
-            type="date"
-            value={rule.value}
-            onChange={(e) => onChange({ ...rule, value: e.target.value })}
-            className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
+          <div className="w-40">
+            <DateField value={rule.value} onChange={(v) => onChange({ ...rule, value: v })} />
+          </div>
         );
       default:
         return (
@@ -297,10 +292,9 @@ function FilterRuleRow({
   return (
     <div className="flex items-center gap-2 flex-wrap">
       {/* Field selector */}
-      <select
+      <SelectField
         value={rule.field}
-        onChange={(e) => handleFieldChange(e.target.value as FilterField)}
-        className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        onChange={(v) => handleFieldChange(v as FilterField)}
       >
         {(Object.entries(fieldConfig) as [FilterField, typeof config][]).map(
           ([key, cfg]) => (
@@ -309,23 +303,22 @@ function FilterRuleRow({
             </option>
           )
         )}
-      </select>
+      </SelectField>
 
       {/* Operator selector */}
       {operators.length > 1 && (
-        <select
+        <SelectField
           value={rule.operator}
-          onChange={(e) =>
-            onChange({ ...rule, operator: e.target.value as FilterOperator })
+          onChange={(v) =>
+            onChange({ ...rule, operator: v as FilterOperator })
           }
-          className="rounded-lg border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           {operators.map((op) => (
             <option key={op.value} value={op.value}>
               {op.label}
             </option>
           ))}
-        </select>
+        </SelectField>
       )}
 
       {/* Value input */}

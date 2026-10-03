@@ -7,6 +7,7 @@ import { getCountries } from "libphonenumber-js";
 import { DateField, TimeField } from "@/components/ui/date-time-field";
 import { createContact, updateContact, type ContactFormInput } from "@/lib/actions/contacts";
 import type { LeadTemperature } from "@/lib/types/database";
+import { SelectField } from "@/components/ui/select-field";
 
 const TEMPERATURE_OPTIONS: { value: LeadTemperature; label: string }[] = [
   { value: "cold", label: "Frio" },
@@ -199,10 +200,10 @@ export function ContactFormModal({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground">Pais</label>
-                  <select
+                  <SelectField
                     value={values.country ?? ""}
-                    onChange={(e) => set("country", e.target.value || null)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    onChange={(v) => set("country", v || null)}
+                    className="w-full"
                   >
                     <option value="">Sin definir</option>
                     {COUNTRY_OPTIONS.map((c) => (
@@ -210,7 +211,7 @@ export function ContactFormModal({
                         {c.name}
                       </option>
                     ))}
-                  </select>
+                  </SelectField>
                 </div>
               </div>
             </section>
@@ -272,10 +273,10 @@ export function ContactFormModal({
               <div className="space-y-2">
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground">Temperatura</label>
-                  <select
+                  <SelectField
                     value={values.lead_temperature ?? ""}
-                    onChange={(e) => set("lead_temperature", (e.target.value || null) as LeadTemperature | null)}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    onChange={(v) => set("lead_temperature", (v || null) as LeadTemperature | null)}
+                    className="w-full"
                   >
                     <option value="">Sin temperatura</option>
                     {TEMPERATURE_OPTIONS.map((t) => (
@@ -283,7 +284,7 @@ export function ContactFormModal({
                         {t.label}
                       </option>
                     ))}
-                  </select>
+                  </SelectField>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <DateField label="Proximo seguimiento" value={followupDate} onChange={setFollowupDate} />

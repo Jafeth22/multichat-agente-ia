@@ -3,6 +3,8 @@
 import { getWorkspace } from "@/lib/workspace";
 import { isOwnerOrAdmin } from "@/lib/permissions";
 import { storeSecret, deleteSecret } from "@/lib/vault";
+import { createServiceClient } from "@/lib/supabase/server";
+import { logAuditEvent } from "@/lib/audit";
 import { createZernioClient } from "@/lib/zernio-client";
 import {
   ensureWebhookRegistered,
@@ -42,7 +44,7 @@ async function requireAdmin() {
 export async function saveZernioApiKey(
   apiKey: string
 ): Promise<{ ok: true; accountCount: number } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
   const trimmed = apiKey.trim();
   if (!trimmed) return { error: "La API key no puede estar vacia" };
 
@@ -139,6 +141,17 @@ export async function saveZernioApiKey(
     console.error("[integrations] zernio inbox backfill failed:", err);
   }
 
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "channel",
+    entityId: null,
+    action: "channel_connected",
+    performedBy: user.id,
+    metadata: { platform: "zernio" },
+  });
+
   return { ok: true, accountCount: accounts.length };
 }
 
@@ -149,7 +162,7 @@ export async function saveZernioApiKey(
  * canal, con su propio aviso de confirmacion).
  */
 export async function disconnectZernio(): Promise<{ ok: true } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
 
   await deleteSecret(supabase, ZERNIO_SECRET_NAME, workspace.id);
 
@@ -160,7 +173,17 @@ export async function disconnectZernio(): Promise<{ ok: true } | { error: string
     .eq("provider", "zernio");
   if (error) return { error: error.message };
 
-  // Punto de enganche Bloque 3: audit_log ("channel_disconnected", provider "zernio").
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "channel",
+    entityId: null,
+    action: "channel_disconnected",
+    performedBy: user.id,
+    metadata: { platform: "zernio" },
+  });
+
   return { ok: true };
 }
 
@@ -172,7 +195,7 @@ export async function saveResendConfig(
   apiKey: string,
   fromEmail: string
 ): Promise<{ ok: true } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
   const trimmedKey = apiKey.trim();
   const trimmedEmail = fromEmail.trim();
 
@@ -202,11 +225,22 @@ export async function saveResendConfig(
   );
   if (error) return { error: error.message };
 
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "workspace_settings",
+    entityId: null,
+    action: "settings_updated",
+    performedBy: user.id,
+    metadata: { provider: "resend" },
+  });
+
   return { ok: true };
 }
 
 export async function disconnectResend(): Promise<{ ok: true } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
 
   await deleteSecret(supabase, RESEND_SECRET_NAME, workspace.id);
 
@@ -216,6 +250,17 @@ export async function disconnectResend(): Promise<{ ok: true } | { error: string
     .eq("workspace_id", workspace.id)
     .eq("provider", "resend");
   if (error) return { error: error.message };
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "workspace_settings",
+    entityId: null,
+    action: "settings_updated",
+    performedBy: user.id,
+    metadata: { provider: "resend", disconnected: true },
+  });
 
   return { ok: true };
 }
@@ -229,7 +274,7 @@ export async function saveAiProviderKey(
   apiKey: string,
   defaultModel: string
 ): Promise<{ ok: true } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
   const trimmed = apiKey.trim();
 
   if (trimmed.length < AI_PROVIDER_MIN_KEY_LENGTH) {
@@ -263,13 +308,24 @@ export async function saveAiProviderKey(
   );
   if (error) return { error: error.message };
 
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "workspace_settings",
+    entityId: null,
+    action: "settings_updated",
+    performedBy: user.id,
+    metadata: { provider },
+  });
+
   return { ok: true };
 }
 
 export async function disconnectAiProvider(
   provider: AiProvider
 ): Promise<{ ok: true } | { error: string }> {
-  const { workspace, supabase } = await requireAdmin();
+  const { workspace, user, supabase } = await requireAdmin();
 
   await deleteSecret(supabase, aiProviderSecretName(provider), workspace.id);
 
@@ -279,6 +335,17 @@ export async function disconnectAiProvider(
     .eq("workspace_id", workspace.id)
     .eq("provider", provider);
   if (error) return { error: error.message };
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "workspace_settings",
+    entityId: null,
+    action: "settings_updated",
+    performedBy: user.id,
+    metadata: { provider, disconnected: true },
+  });
 
   return { ok: true };
 }

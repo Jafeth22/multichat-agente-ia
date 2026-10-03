@@ -11,6 +11,7 @@ export default async function SettingsPage() {
         name: workspace.name,
         hasAiKey: !!workspace.ai_api_key,
         globalKeywords: (workspace.global_keywords as string[]) ?? [],
+        optoutPhrases: (workspace.optout_phrases as string[]) ?? [],
       }}
     />
   );

@@ -58,7 +58,7 @@ export type NodeType =
   | "enrollSequence";
 
 export type SequenceStatus = "draft" | "active" | "paused";
-export type SequenceEnrollmentStatus = "active" | "completed" | "cancelled";
+export type SequenceEnrollmentStatus = "active" | "completed" | "cancelled" | "paused_optout";
 
 export interface SequenceStep {
   type: "message" | "delay";
@@ -80,6 +80,7 @@ export interface Database {
           ai_api_key: string | null;
           ai_provider: string;
           global_keywords: Json | null;
+          optout_phrases: Json | null;
           created_at: string;
           updated_at: string;
         };
@@ -91,6 +92,7 @@ export interface Database {
           ai_api_key?: string | null;
           ai_provider?: string;
           global_keywords?: Json | null;
+          optout_phrases?: Json | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -102,6 +104,7 @@ export interface Database {
           ai_api_key?: string | null;
           ai_provider?: string;
           global_keywords?: Json | null;
+          optout_phrases?: Json | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -1350,6 +1353,82 @@ export interface Database {
             columns: ["channel_id"];
             isOneToOne: false;
             referencedRelation: "channels";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      response_templates: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          name: string;
+          content: string;
+          shortcut: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+          deleted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          name: string;
+          content: string;
+          shortcut?: string | null;
+          created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          deleted_at?: string | null;
+        };
+        Update: {
+          name?: string;
+          content?: string;
+          shortcut?: string | null;
+          deleted_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "response_templates_workspace_id_fkey";
+            columns: ["workspace_id"];
+            isOneToOne: false;
+            referencedRelation: "workspaces";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      csv_imports: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          file_name: string;
+          total_rows: number;
+          imported: number;
+          updated: number;
+          errors: number;
+          error_details: Json | null;
+          imported_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          file_name: string;
+          total_rows?: number;
+          imported?: number;
+          updated?: number;
+          errors?: number;
+          error_details?: Json | null;
+          imported_by?: string | null;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "csv_imports_workspace_id_fkey";
+            columns: ["workspace_id"];
+            isOneToOne: false;
+            referencedRelation: "workspaces";
             referencedColumns: ["id"];
           },
         ];

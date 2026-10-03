@@ -5,6 +5,7 @@ import { getWorkspace } from "@/lib/workspace";
 import { isOwnerOrAdmin } from "@/lib/permissions";
 import { sendEmail } from "@/lib/email/send-email";
 import { listWorkspaceMembers } from "@/lib/members";
+import { logAuditEvent, diffFields } from "@/lib/audit";
 
 export async function inviteTeamMember(
   workspaceId: string,
@@ -93,6 +94,17 @@ export async function inviteTeamMember(
     template: "team_invite",
   });
 
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "team_member",
+    entityId: null,
+    action: "invited",
+    performedBy: user.id,
+    metadata: { email: trimmedEmail, role },
+  });
+
   return { ok: true, invite };
 }
 
@@ -132,6 +144,16 @@ export async function removeTeamMember(
   if (deleteError) {
     return { error: deleteError.message };
   }
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId,
+    entityType: "team_member",
+    entityId: userId,
+    action: "removed",
+    performedBy: user.id,
+  });
 
   return { ok: true };
 }
@@ -188,6 +210,17 @@ export async function changeTeamMemberRole(
   if (updateError) {
     return { error: updateError.message };
   }
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId,
+    entityType: "team_member",
+    entityId: userId,
+    action: "role_changed",
+    performedBy: user.id,
+    changes: diffFields({ role: target?.role }, { role: newRole }, ["role"]),
+  });
 
   return { ok: true };
 }

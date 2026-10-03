@@ -15,15 +15,17 @@ import {
   ChevronRight,
   Sparkles,
   Plug,
+  Ban,
 } from "lucide-react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { updateWorkspaceSettings } from "@/lib/actions/workspace";
 
 interface WorkspaceSettings {
   id: string;
   name: string;
   hasAiKey: boolean;
   globalKeywords: string[];
+  optoutPhrases: string[];
 }
 
 export function SettingsView({
@@ -36,6 +38,8 @@ export function SettingsView({
   const [showAiKey, setShowAiKey] = useState(false);
   const [keywords, setKeywords] = useState<string[]>(workspace.globalKeywords);
   const [newKeyword, setNewKeyword] = useState("");
+  const [optoutPhrases, setOptoutPhrases] = useState<string[]>(workspace.optoutPhrases);
+  const [newOptoutPhrase, setNewOptoutPhrase] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +59,21 @@ export function SettingsView({
     setKeywords((prev) => prev.filter((k) => k !== kw));
   }
 
+  function addOptoutPhrase() {
+    const trimmed = newOptoutPhrase.trim().toLowerCase();
+    if (!trimmed) return;
+    if (optoutPhrases.includes(trimmed)) {
+      setNewOptoutPhrase("");
+      return;
+    }
+    setOptoutPhrases((prev) => [...prev, trimmed]);
+    setNewOptoutPhrase("");
+  }
+
+  function removeOptoutPhrase(phrase: string) {
+    setOptoutPhrases((prev) => prev.filter((p) => p !== phrase));
+  }
+
   async function handleSave() {
     if (saving) return;
     setSaving(true);
@@ -62,28 +81,15 @@ export function SettingsView({
     setSaved(false);
 
     try {
-      const supabase = createClient();
+      const result = await updateWorkspaceSettings({
+        name,
+        globalKeywords: keywords,
+        optoutPhrases,
+        aiApiKey: aiKey.trim() || undefined,
+      });
 
-      const update: Record<string, unknown> = {
-        name: name.trim(),
-        global_keywords: keywords,
-      };
-
-      // Only update the key if the user entered a new one
-      if (aiKey.trim()) {
-        update.ai_api_key = aiKey.trim();
-      }
-
-      const { error: updateError } = await supabase
-        .from("workspaces")
-        .update(update)
-        .eq("id", workspace.id)
-        .select("id")
-        .single();
-
-      if (updateError) {
-        console.error("Settings save error:", updateError);
-        throw new Error(updateError.message);
+      if ("error" in result) {
+        throw new Error(result.error);
       }
 
       setSaved(true);
@@ -263,6 +269,66 @@ export function SettingsView({
             ) : (
               <p className="mt-3 text-xs text-muted-foreground/70">
                 No global keywords configured
+              </p>
+            )}
+          </section>
+
+          <hr className="border-border" />
+
+          {/* Frases de "no contactar" (F18) */}
+          <section>
+            <div className="flex items-center gap-2">
+              <Ban className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Frases de &quot;no contactar&quot;</h2>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Si un contacto escribe alguna de estas frases, se marca automaticamente como
+              &quot;no contactar&quot; y se pausan sus secuencias activas.
+            </p>
+
+            <div className="mt-4 flex gap-2">
+              <input
+                type="text"
+                value={newOptoutPhrase}
+                onChange={(e) => setNewOptoutPhrase(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addOptoutPhrase();
+                  }
+                }}
+                placeholder="Agregar una frase..."
+                className="flex-1 rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <button
+                onClick={addOptoutPhrase}
+                disabled={!newOptoutPhrase.trim()}
+                className="rounded-lg bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+
+            {optoutPhrases.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {optoutPhrases.map((phrase) => (
+                  <span
+                    key={phrase}
+                    className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium"
+                  >
+                    {phrase}
+                    <button
+                      onClick={() => removeOptoutPhrase(phrase)}
+                      className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground/70">
+                No hay frases configuradas
               </p>
             )}
           </section>

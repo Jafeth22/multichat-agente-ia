@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Plus } from "lucide-react";
 import { addTagToContact, removeTagFromContact } from "@/lib/actions/contact-tags";
+import { SelectField } from "@/components/ui/select-field";
 import type { Database } from "@/lib/types/database";
 
 type Tag = Database["public"]["Tables"]["tags"]["Row"];
@@ -55,19 +56,18 @@ export function ContactTagsEditor({
       {tags.length === 0 && <span className="text-xs text-muted-foreground/70">Sin tags</span>}
 
       {adding ? (
-        <select
-          autoFocus
-          onChange={(e) => e.target.value && handleAdd(e.target.value)}
-          onBlur={() => setAdding(false)}
-          className="rounded-full border border-input bg-background px-2 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        <SelectField
+          size="sm"
+          value=""
+          placeholder="Elegir tag..."
+          onChange={(v) => v && handleAdd(v)}
         >
-          <option value="">Elegir tag...</option>
           {available.map((tag) => (
             <option key={tag.id} value={tag.id}>
               {tag.name}
             </option>
           ))}
-        </select>
+        </SelectField>
       ) : available.length > 0 ? (
         <button
           onClick={() => setAdding(true)}

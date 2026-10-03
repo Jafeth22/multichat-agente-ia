@@ -21,13 +21,16 @@
     "libphonenumber-js": "^1.13.14",
     "lucide-react": "^0.563.0",
     "next": "^16.1.6",
+    "papaparse": "^5.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.18",
     "@types/node": "^25.2.3",
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.2",
