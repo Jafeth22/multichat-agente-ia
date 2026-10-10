@@ -1,34 +1,41 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, ExternalLink, Loader2 } from "lucide-react";
-import { saveResendConfig, disconnectResend } from "@/lib/actions/integrations";
+import { toast } from "sonner";
+import { ExternalLink, Loader2, Send } from "lucide-react";
+import { saveResendConfig, disconnectResend, sendResendTestEmail } from "@/lib/actions/integrations";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { StatusBadge, type IntegrationStatus } from "@/components/integrations/status-badge";
+import { PasswordInput } from "@/components/ui/password-input";
+import { SavedKeyRow } from "@/components/integrations/api-key-fields";
 
+/** Contenido del bloque Email: remitente y API key de Resend, con email de prueba. */
 export function ResendCard({
   isActive,
   fromEmail: initialFromEmail,
+  keyHint,
 }: {
   isActive: boolean;
   fromEmail: string | null;
+  keyHint: string | null;
 }) {
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  const [active, setActive] = useState(isActive);
+  const [editing, setEditing] = useState(!isActive);
+  const [savedFrom, setSavedFrom] = useState(initialFromEmail ?? "");
   const [fromEmail, setFromEmail] = useState(initialFromEmail ?? "");
+  const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [active, setActive] = useState(isActive);
 
-  const status: IntegrationStatus = saving ? "saving" : active ? "connected" : "not_configured";
+  const canSave = !!fromEmail.trim() && (active || !!apiKey.trim()) && !saving;
 
-  async function handleSave() {
-    if (!apiKey.trim() || !fromEmail.trim() || saving) return;
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canSave) return;
     setSaving(true);
     setError(null);
-
     const result = await saveResendConfig(apiKey.trim(), fromEmail.trim());
     setSaving(false);
 
@@ -36,9 +43,22 @@ export function ResendCard({
       setError(result.error);
       return;
     }
-
     setActive(true);
+    setEditing(false);
+    setSavedFrom(fromEmail.trim());
     setApiKey("");
+    toast.success("Email configurado. Probalo con \"Enviar email de prueba\".");
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    const result = await sendResendTestEmail();
+    setTesting(false);
+    if ("error" in result) {
+      toast.error(`No se pudo mandar el email de prueba: ${result.error}`);
+      return;
+    }
+    toast.success(`Listo: te mandamos un email de prueba a ${result.to}`);
   }
 
   async function handleDisconnect() {
@@ -47,99 +67,138 @@ export function ResendCard({
     const result = await disconnectResend();
     setDisconnecting(false);
     if ("error" in result) {
-      setError(result.error);
+      toast.error(result.error);
       return;
     }
     setActive(false);
+    setEditing(true);
+    toast.success("Email desconectado");
   }
 
+  const inputClass =
+    "w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring disabled:opacity-50";
+
   return (
-    <div className="rounded-lg border border-border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium">Resend</p>
-          <p className="text-xs text-muted-foreground">Email transaccional: invitaciones de equipo y avisos</p>
-        </div>
-        <StatusBadge status={status} />
-      </div>
-
-      <p className="mt-2 text-xs text-muted-foreground">
-        Conseguí tu API key y verificá tu dominio en{" "}
-        <a
-          href="https://resend.com/api-keys"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-80"
-        >
-          resend.com
-          <ExternalLink className="h-3 w-3" />
-        </a>
-        . El remitente tiene que ser de un dominio ya verificado ahi.
-      </p>
-
-      <div className="mt-3 space-y-2">
-        <div className="relative">
-          <input
-            type={showKey ? "text" : "password"}
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              setError(null);
-            }}
-            disabled={saving}
-            placeholder={active ? "Ingresa una key nueva para reemplazar la actual" : "re_..."}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-10 text-sm font-mono placeholder:text-muted-foreground placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+    <>
+      {active && !editing ? (
+        <>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-muted/60 px-3 py-2.5">
+            <span className="w-16 text-xs text-muted-foreground">Envía desde</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium">{savedFrom}</span>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="rounded px-1 text-xs font-medium text-primary hover:underline underline-offset-2"
+            >
+              Cambiar
+            </button>
+          </div>
+          <SavedKeyRow
+            hint={keyHint}
+            onChange={() => setEditing(true)}
+            onDisconnect={() => setConfirmDisconnect(true)}
+            disconnecting={disconnecting}
           />
-          <button
-            type="button"
-            onClick={() => setShowKey(!showKey)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          >
-            {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-          </button>
-        </div>
-        <input
-          type="email"
-          value={fromEmail}
-          onChange={(e) => setFromEmail(e.target.value)}
-          disabled={saving}
-          placeholder="notificaciones@tudominio.com"
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-        />
-      </div>
-
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={!apiKey.trim() || !fromEmail.trim() || saving}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-        >
-          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {saving ? "Guardando..." : active ? "Actualizar" : "Conectar"}
-        </button>
-
-        {active && (
-          <button
-            onClick={() => setConfirmDisconnect(true)}
-            disabled={disconnecting}
-            className="text-xs font-medium text-muted-foreground hover:text-destructive disabled:opacity-50"
-          >
-            {disconnecting ? "Desconectando..." : "Desconectar"}
-          </button>
-        )}
-
-        {error && <span className="text-xs text-red-600">{error}</span>}
-      </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={testing}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+            >
+              {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              {testing ? "Enviando..." : "Enviar email de prueba"}
+            </button>
+            <span className="text-xs text-muted-foreground">Se usa para invitaciones del equipo y avisos.</span>
+          </div>
+        </>
+      ) : (
+        <form onSubmit={handleSave} className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label htmlFor="resend-from" className="block text-xs font-medium">
+                Email remitente
+              </label>
+              <input
+                id="resend-from"
+                type="email"
+                data-step-focus
+                value={fromEmail}
+                disabled={saving}
+                onChange={(e) => {
+                  setFromEmail(e.target.value);
+                  setError(null);
+                }}
+                placeholder="notificaciones@tudominio.com"
+                className={inputClass}
+              />
+              <p className="text-xs text-muted-foreground">Tiene que ser de un dominio verificado en Resend.</p>
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium">API key de Resend</label>
+              <PasswordInput
+                value={apiKey}
+                autoComplete="off"
+                disabled={saving}
+                onChange={(e) => {
+                  setApiKey(e.target.value);
+                  setError(null);
+                }}
+                placeholder={active ? "Dejala vacía para mantener la actual" : "re_..."}
+                className="font-mono placeholder:font-sans disabled:opacity-50"
+              />
+              <p className="text-xs text-muted-foreground">
+                La conseguís en{" "}
+                <a
+                  href="https://resend.com/api-keys"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  resend.com
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </p>
+            </div>
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              disabled={!canSave}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {saving ? "Guardando..." : "Guardar"}
+            </button>
+            {active && !saving && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditing(false);
+                  setFromEmail(savedFrom);
+                  setApiKey("");
+                  setError(null);
+                }}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent"
+              >
+                Cancelar
+              </button>
+            )}
+          </div>
+        </form>
+      )}
 
       <ConfirmDialog
         open={confirmDisconnect}
-        title="Desconectar Resend?"
-        message="Se borra la API key guardada. Las invitaciones de equipo y los avisos de desconexion van a dejar de mandarse por email hasta que la reconectes."
+        title="¿Desconectar el email?"
+        message="Se borra la API key guardada. Las invitaciones de equipo y los avisos de desconexión van a dejar de mandarse por email hasta que la reconectes."
         confirmLabel="Desconectar"
+        cancelLabel="Cancelar"
         destructive
         onConfirm={handleDisconnect}
         onCancel={() => setConfirmDisconnect(false)}
       />
-    </div>
+    </>
   );
 }

@@ -75,6 +75,8 @@ NO reescribir: auth + trigger de creacion de workspace, flow builder (17 nodos),
 - Single-tenant: un solo workspace. No construir gestion multi-workspace.
 - Pantalla de integraciones en `/settings/integrations`.
 - Todos los dropdowns usan `components/ui/select-field.tsx` (mismo estilo en todo el sistema). Las fechas usan `DateField` (`components/ui/date-time-field.tsx`) y se muestran siempre como `dd/mm/yyyy`. No usar `<select>`, `<input type="date">` ni `datetime-local` nativos.
+- Todos los tooltips (texto al pasar el mouse) usan `Tooltip` de `components/ui/tooltip.tsx`, con el estilo del sistema. No usar el atributo `title` nativo para mostrar ayudas.
+- Colores de estado iguales en todo el sistema (`lib/integration-status.ts`): verde activo, ambar pausado, azul esperando/en proceso, rojo desconectado o error, gris sin configurar.
 - No construir nada que el documento de requerimientos marque como fuera de alcance o de fases siguientes.
 
 # Calidad de codigo (template-ready)

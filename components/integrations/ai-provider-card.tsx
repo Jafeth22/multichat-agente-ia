@@ -1,53 +1,81 @@
 "use client";
 
 import { useState } from "react";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { saveAiProviderKey, disconnectAiProvider } from "@/lib/actions/integrations";
-import { ConfirmDialog } from "@/components/confirm-dialog";
-import { StatusBadge, type IntegrationStatus } from "@/components/integrations/status-badge";
+import { toast } from "sonner";
+import { KeyRound, Plus, PowerOff, Star } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
-  AI_PROVIDER_DEFAULT_MODELS,
-  AI_PROVIDER_LABELS,
-  type AiProvider,
-} from "@/lib/ai-providers";
+  saveAiProviderKey,
+  disconnectAiProvider,
+  updateAiProviderModel,
+  setDefaultAiProvider,
+} from "@/lib/actions/integrations";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ActionsMenu } from "@/components/ui/actions-menu";
 import { SelectField } from "@/components/ui/select-field";
+import { Tooltip } from "@/components/ui/tooltip";
+import { ApiKeyForm } from "@/components/integrations/api-key-fields";
+import { StatusDot } from "@/components/integrations/status-chips";
+import { AI_PROVIDER_DEFAULT_MODELS, AI_PROVIDER_LABELS, type AiProvider } from "@/lib/ai-providers";
 
+/** Tarjeta de un proveedor de IA (BYOK) dentro de la grilla de 3. */
 export function AiProviderCard({
   provider,
   isActive,
-  defaultModel: initialDefaultModel,
+  defaultModel,
+  keyHint,
+  isDefault,
 }: {
   provider: AiProvider;
   isActive: boolean;
   defaultModel: string | null;
+  keyHint: string | null;
+  isDefault: boolean;
 }) {
   const models = AI_PROVIDER_DEFAULT_MODELS[provider];
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState(initialDefaultModel ?? models[0]);
+  const label = AI_PROVIDER_LABELS[provider];
+  const [active, setActive] = useState(isActive);
+  const [editing, setEditing] = useState(false);
+  const [model, setModel] = useState(defaultModel && models.includes(defaultModel) ? defaultModel : models[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [active, setActive] = useState(isActive);
 
-  const status: IntegrationStatus = saving ? "saving" : active ? "connected" : "not_configured";
-
-  async function handleSave() {
-    if (!apiKey.trim() || saving) return;
+  async function handleSave(apiKey: string) {
     setSaving(true);
     setError(null);
-
-    const result = await saveAiProviderKey(provider, apiKey.trim(), model);
+    const result = await saveAiProviderKey(provider, apiKey, model);
     setSaving(false);
-
     if ("error" in result) {
       setError(result.error);
       return;
     }
-
     setActive(true);
-    setApiKey("");
+    setEditing(false);
+    toast.success(`${label} conectado`);
+  }
+
+  async function handleModelChange(next: string) {
+    const previous = model;
+    setModel(next);
+    if (!active || editing) return;
+    const result = await updateAiProviderModel(provider, next);
+    if ("error" in result) {
+      setModel(previous);
+      toast.error(result.error);
+      return;
+    }
+    toast.success(`Modelo actualizado: ${next}`);
+  }
+
+  async function handleSetDefault() {
+    const result = await setDefaultAiProvider(provider);
+    if ("error" in result) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success(`${label} queda como predeterminado`);
   }
 
   async function handleDisconnect() {
@@ -56,83 +84,112 @@ export function AiProviderCard({
     const result = await disconnectAiProvider(provider);
     setDisconnecting(false);
     if ("error" in result) {
-      setError(result.error);
+      toast.error(result.error);
       return;
     }
     setActive(false);
+    toast.success(`${label} desconectado`);
   }
 
+  const modelSelect = (
+    <SelectField value={model} onChange={handleModelChange} disabled={saving} size="sm" className="w-full">
+      {models.map((m) => (
+        <option key={m} value={m}>
+          {m}
+        </option>
+      ))}
+    </SelectField>
+  );
+
   return (
-    <div className="rounded-lg border border-border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">{AI_PROVIDER_LABELS[provider]}</p>
-        <StatusBadge status={status} />
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-3 rounded-xl border bg-background p-3",
+        active && isDefault ? "border-primary ring-1 ring-primary" : "border-border"
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-bold">
+          {label.charAt(0)}
+        </span>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold">{label}</p>
+        {active && (
+          <Tooltip content={keyHint ? `Conectado (key ••••${keyHint})` : "Conectado"}>
+            <StatusDot tone="ok" />
+          </Tooltip>
+        )}
       </div>
 
-      <div className="mt-3 space-y-2">
-        <div className="relative">
-          <input
-            type={showKey ? "text" : "password"}
-            value={apiKey}
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              setError(null);
-            }}
-            disabled={saving}
-            placeholder={active ? "Ingresa una key nueva para reemplazar la actual" : "API key"}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-10 text-sm font-mono placeholder:text-muted-foreground placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-          />
+      {editing || (!active && error) ? (
+        <ApiKeyForm
+          placeholder="Pegá tu API key"
+          saving={saving}
+          savingLabel="Guardando..."
+          error={error}
+          onInput={() => setError(null)}
+          onSubmit={handleSave}
+          onCancel={() => {
+            setEditing(false);
+            setError(null);
+          }}
+        >
+          {modelSelect}
+        </ApiKeyForm>
+      ) : active ? (
+        <>
+          {modelSelect}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={handleSetDefault}
+              disabled={isDefault}
+              className={cn(
+                "inline-flex items-center gap-1 text-[11px] disabled:cursor-default",
+                isDefault ? "font-semibold text-primary" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Star className={cn("h-3.5 w-3.5", isDefault && "fill-current")} />
+              {isDefault ? "Predeterminado" : "Usar por defecto"}
+            </button>
+            <ActionsMenu
+              loading={disconnecting}
+              title={`Más acciones de ${label}`}
+              items={[
+                {
+                  label: "Cambiar API key",
+                  icon: <KeyRound className="h-3.5 w-3.5" />,
+                  onClick: () => setEditing(true),
+                },
+                {
+                  label: "Desconectar",
+                  icon: <PowerOff className="h-3.5 w-3.5" />,
+                  destructive: true,
+                  onClick: () => setConfirmDisconnect(true),
+                },
+              ]}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">Modelos: {models.slice(0, 2).join(", ")}...</p>
           <button
             type="button"
-            onClick={() => setShowKey(!showKey)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-accent"
           >
-            {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            <Plus className="h-3.5 w-3.5" />
+            Conectar
           </button>
-        </div>
-
-        <SelectField
-          value={model}
-          onChange={(v) => setModel(v)}
-          disabled={saving}
-          className="w-full"
-        >
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </SelectField>
-      </div>
-
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={!apiKey.trim() || saving}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-        >
-          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {saving ? "Guardando..." : active ? "Actualizar" : "Conectar"}
-        </button>
-
-        {active && (
-          <button
-            onClick={() => setConfirmDisconnect(true)}
-            disabled={disconnecting}
-            className="text-xs font-medium text-muted-foreground hover:text-destructive disabled:opacity-50"
-          >
-            {disconnecting ? "Desconectando..." : "Desconectar"}
-          </button>
-        )}
-
-        {error && <span className="text-xs text-red-600">{error}</span>}
-      </div>
+        </>
+      )}
 
       <ConfirmDialog
         open={confirmDisconnect}
-        title={`Desconectar ${AI_PROVIDER_LABELS[provider]}?`}
+        title={`¿Desconectar ${label}?`}
         message="Se borra la API key guardada."
         confirmLabel="Desconectar"
+        cancelLabel="Cancelar"
         destructive
         onConfirm={handleDisconnect}
         onCancel={() => setConfirmDisconnect(false)}

@@ -2,7 +2,7 @@
 
 import { getWorkspace } from "@/lib/workspace";
 import { isOwnerOrAdmin } from "@/lib/permissions";
-import { storeSecret, deleteSecret } from "@/lib/vault";
+import { storeSecret, deleteSecret, type DbClient } from "@/lib/vault";
 import { createServiceClient } from "@/lib/supabase/server";
 import { logAuditEvent } from "@/lib/audit";
 import { createZernioClient } from "@/lib/zernio-client";
@@ -12,7 +12,10 @@ import {
 } from "@/lib/zernio-webhook";
 import { backfillInboxConversations } from "@/lib/inbox-sync";
 import { isSupportedPlatform } from "@/lib/platforms";
+import { keyHint } from "@/lib/integration-status";
+import { sendEmail } from "@/lib/email/send-email";
 import {
+  AI_PROVIDERS,
   AI_PROVIDER_DEFAULT_MODELS,
   AI_PROVIDER_KEY_PREFIXES,
   AI_PROVIDER_LABELS,
@@ -75,6 +78,7 @@ export async function saveZernioApiKey(
       provider: "zernio",
       display_name: "Zernio (Instagram, Facebook, Twitter)",
       vault_secret_name: ZERNIO_SECRET_NAME,
+      config: { key_hint: keyHint(trimmed) },
       is_active: true,
       connected_at: new Date().toISOString(),
       last_error: null,
@@ -191,6 +195,10 @@ export async function disconnectZernio(): Promise<{ ok: true } | { error: string
 // Resend (email saliente)
 // ------------------------------------------------------------
 
+/**
+ * Guarda remitente y API key de Resend. Si ya estaba conectado, la key
+ * puede venir vacia: se cambia solo el remitente y se mantiene la key.
+ */
 export async function saveResendConfig(
   apiKey: string,
   fromEmail: string
@@ -199,15 +207,28 @@ export async function saveResendConfig(
   const trimmedKey = apiKey.trim();
   const trimmedEmail = fromEmail.trim();
 
-  if (!trimmedKey.startsWith("re_") || trimmedKey.length < 10) {
-    return { error: "La API key de Resend empieza con \"re_\"" };
-  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
     return { error: "El remitente tiene que ser un email valido" };
   }
 
-  const stored = await storeSecret(supabase, RESEND_SECRET_NAME, trimmedKey, workspace.id);
-  if (!stored.ok) return { error: stored.error };
+  let hint: string;
+  if (!trimmedKey) {
+    const { data: existing } = await supabase
+      .from("integration_configs")
+      .select("config, is_active")
+      .eq("workspace_id", workspace.id)
+      .eq("provider", "resend")
+      .maybeSingle();
+    if (!existing?.is_active) return { error: "Pega la API key de Resend" };
+    hint = (existing.config as { key_hint?: string } | null)?.key_hint ?? "";
+  } else {
+    if (!trimmedKey.startsWith("re_") || trimmedKey.length < 10) {
+      return { error: "La API key de Resend empieza con \"re_\"" };
+    }
+    const stored = await storeSecret(supabase, RESEND_SECRET_NAME, trimmedKey, workspace.id);
+    if (!stored.ok) return { error: stored.error };
+    hint = keyHint(trimmedKey);
+  }
 
   const { error } = await supabase.from("integration_configs").upsert(
     {
@@ -216,7 +237,7 @@ export async function saveResendConfig(
       provider: "resend",
       display_name: "Resend",
       vault_secret_name: RESEND_SECRET_NAME,
-      config: { from_email: trimmedEmail },
+      config: { from_email: trimmedEmail, key_hint: hint },
       is_active: true,
       connected_at: new Date().toISOString(),
       last_error: null,
@@ -292,6 +313,12 @@ export async function saveAiProviderKey(
   const stored = await storeSecret(supabase, secretName, trimmed, workspace.id);
   if (!stored.ok) return { error: stored.error };
 
+  // El primer proveedor conectado queda como predeterminado; si ya lo era, lo sigue siendo.
+  const configs = await activeAiConfigs(supabase, workspace.id);
+  const isDefault =
+    configs.find((c) => c.provider === provider)?.config.is_default === true ||
+    !configs.some((c) => c.provider !== provider && c.config.is_default === true);
+
   const { error } = await supabase.from("integration_configs").upsert(
     {
       workspace_id: workspace.id,
@@ -299,7 +326,7 @@ export async function saveAiProviderKey(
       provider,
       display_name: AI_PROVIDER_LABELS[provider],
       vault_secret_name: secretName,
-      config: { default_model: defaultModel },
+      config: { default_model: defaultModel, key_hint: keyHint(trimmed), is_default: isDefault },
       is_active: true,
       connected_at: new Date().toISOString(),
       last_error: null,
@@ -329,12 +356,29 @@ export async function disconnectAiProvider(
 
   await deleteSecret(supabase, aiProviderSecretName(provider), workspace.id);
 
+  const configs = await activeAiConfigs(supabase, workspace.id);
+  const current = configs.find((c) => c.provider === provider);
+
   const { error } = await supabase
     .from("integration_configs")
-    .update({ is_active: false, connected_at: null })
+    .update({
+      is_active: false,
+      connected_at: null,
+      ...(current ? { config: { ...current.config, is_default: false } } : {}),
+    })
     .eq("workspace_id", workspace.id)
     .eq("provider", provider);
   if (error) return { error: error.message };
+
+  // Si era el predeterminado, pasa a serlo el siguiente proveedor conectado.
+  const next = configs.find((c) => c.provider !== provider);
+  if (current?.config.is_default && next) {
+    await supabase
+      .from("integration_configs")
+      .update({ config: { ...next.config, is_default: true } })
+      .eq("workspace_id", workspace.id)
+      .eq("provider", next.provider);
+  }
 
   const service = await createServiceClient();
   await logAuditEvent({
@@ -348,4 +392,117 @@ export async function disconnectAiProvider(
   });
 
   return { ok: true };
+}
+
+interface AiConfigShape {
+  default_model?: string;
+  key_hint?: string;
+  is_default?: boolean;
+}
+
+/** Proveedores de IA conectados, con su config tipada. */
+async function activeAiConfigs(
+  supabase: DbClient,
+  workspaceId: string
+): Promise<{ provider: AiProvider; config: AiConfigShape }[]> {
+  const { data } = await supabase
+    .from("integration_configs")
+    .select("provider, config")
+    .eq("workspace_id", workspaceId)
+    .eq("type", "ai_provider")
+    .eq("is_active", true);
+  return (data ?? [])
+    .filter((row) => (AI_PROVIDERS as string[]).includes(row.provider))
+    .map((row) => ({
+      provider: row.provider as AiProvider,
+      config: (row.config as AiConfigShape | null) ?? {},
+    }));
+}
+
+/** Cambia el modelo por defecto de un proveedor ya conectado, sin pedir la key de nuevo. */
+export async function updateAiProviderModel(
+  provider: AiProvider,
+  model: string
+): Promise<{ ok: true } | { error: string }> {
+  const { workspace, user, supabase } = await requireAdmin();
+  if (!AI_PROVIDER_DEFAULT_MODELS[provider]?.includes(model)) {
+    return { error: "Modelo invalido" };
+  }
+
+  const current = (await activeAiConfigs(supabase, workspace.id)).find((c) => c.provider === provider);
+  if (!current) return { error: `${AI_PROVIDER_LABELS[provider]} no esta conectado` };
+
+  const { error } = await supabase
+    .from("integration_configs")
+    .update({ config: { ...current.config, default_model: model } })
+    .eq("workspace_id", workspace.id)
+    .eq("provider", provider);
+  if (error) return { error: error.message };
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "workspace_settings",
+    entityId: null,
+    action: "settings_updated",
+    performedBy: user.id,
+    metadata: { provider, default_model: model },
+  });
+
+  return { ok: true };
+}
+
+/** Marca un proveedor de IA conectado como el predeterminado (y desmarca al resto). */
+export async function setDefaultAiProvider(
+  provider: AiProvider
+): Promise<{ ok: true } | { error: string }> {
+  const { workspace, user, supabase } = await requireAdmin();
+
+  const configs = await activeAiConfigs(supabase, workspace.id);
+  if (!configs.some((c) => c.provider === provider)) {
+    return { error: `${AI_PROVIDER_LABELS[provider]} no esta conectado` };
+  }
+
+  for (const c of configs) {
+    const isDefault = c.provider === provider;
+    if ((c.config.is_default === true) === isDefault) continue;
+    const { error } = await supabase
+      .from("integration_configs")
+      .update({ config: { ...c.config, is_default: isDefault } })
+      .eq("workspace_id", workspace.id)
+      .eq("provider", c.provider);
+    if (error) return { error: error.message };
+  }
+
+  const service = await createServiceClient();
+  await logAuditEvent({
+    supabase: service,
+    workspaceId: workspace.id,
+    entityType: "workspace_settings",
+    entityId: null,
+    action: "settings_updated",
+    performedBy: user.id,
+    metadata: { default_ai_provider: provider },
+  });
+
+  return { ok: true };
+}
+
+/** Manda un email de prueba al usuario actual con la configuracion de Resend guardada. */
+export async function sendResendTestEmail(): Promise<{ ok: true; to: string } | { error: string }> {
+  const { workspace, user, supabase } = await requireAdmin();
+  if (!user.email) return { error: "Tu usuario no tiene un email para mandarte la prueba" };
+
+  const result = await sendEmail({
+    supabase,
+    workspaceId: workspace.id,
+    to: user.email,
+    subject: "Email de prueba",
+    html: `<p>Si estas leyendo esto, el email de <strong>${workspace.name}</strong> funciona bien.</p>`,
+    template: "test_email",
+  });
+  if (!result.ok) return { error: result.error ?? "No se pudo mandar el email" };
+
+  return { ok: true, to: user.email };
 }

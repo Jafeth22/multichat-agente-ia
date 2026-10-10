@@ -15,13 +15,6 @@ export default async function IntegrationsPage() {
 
   return (
     <div className="flex h-full flex-col overflow-auto">
-      <div className="border-b border-border px-8 py-6">
-        <h1 className="text-2xl font-bold">Integraciones</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Conecta canales de mensajeria, el email saliente y tus proveedores de IA
-        </p>
-      </div>
-
       <IntegrationsView
         workspaceId={workspace.id}
         integrationConfigs={integrationConfigs ?? []}

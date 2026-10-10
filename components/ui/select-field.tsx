@@ -15,6 +15,7 @@ import {
 import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface ParsedOption {
   value: string;
@@ -181,31 +182,32 @@ export function SelectField({
   return (
     <div className={cn("relative", className)}>
       {label && <label className="mb-1 block text-xs text-muted-foreground">{label}</label>}
-      <button
-        ref={buttonRef}
-        type="button"
-        disabled={disabled}
-        title={title}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => (open ? close() : openMenu())}
-        onKeyDown={onKeyDown}
-        className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-lg border border-input bg-background text-left focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-          size === "sm" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2 text-sm"
-        )}
-      >
-        <span className={cn("truncate", !selected && "text-muted-foreground")}>
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown
+      <Tooltip content={open ? null : title} className="flex w-full">
+        <button
+          ref={buttonRef}
+          type="button"
+          disabled={disabled}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          onClick={() => (open ? close() : openMenu())}
+          onKeyDown={onKeyDown}
           className={cn(
-            "shrink-0 text-muted-foreground transition-transform",
-            size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4",
-            open && "rotate-180"
+            "flex w-full items-center justify-between gap-2 rounded-lg border border-input bg-background text-left focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+            size === "sm" ? "px-2.5 py-1.5 text-xs" : "px-3 py-2 text-sm"
           )}
-        />
-      </button>
+        >
+          <span className={cn("truncate", !selected && "text-muted-foreground")}>
+            {selected ? selected.label : placeholder}
+          </span>
+          <ChevronDown
+            className={cn(
+              "shrink-0 text-muted-foreground transition-transform",
+              size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4",
+              open && "rotate-180"
+            )}
+          />
+        </button>
+      </Tooltip>
 
       {open &&
         rect &&

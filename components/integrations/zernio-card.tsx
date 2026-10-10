@@ -2,31 +2,44 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, ExternalLink, Loader2, Check } from "lucide-react";
+import { toast } from "sonner";
+import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { saveZernioApiKey, disconnectZernio } from "@/lib/actions/integrations";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { StatusBadge, type IntegrationStatus } from "@/components/integrations/status-badge";
+import { PlatformIcon } from "@/components/platform-icon";
+import { Tooltip } from "@/components/ui/tooltip";
+import { ApiKeyForm, SavedKeyRow } from "@/components/integrations/api-key-fields";
+import { ChannelRow } from "@/components/integrations/channel-row";
+import { CHANNEL_PROVIDERS } from "@/lib/channel-providers";
+import { PLATFORM_LABELS, type Platform } from "@/lib/platforms";
+import type { ChannelsState } from "@/components/integrations/use-channels";
 
-export function ZernioCard({ isActive }: { isActive: boolean }) {
+const ZERNIO_PLATFORMS = CHANNEL_PROVIDERS.find((p) => p.id === "zernio")!.platforms;
+const EXTRA_COST_PLATFORMS: Platform[] = ["facebook", "twitter"];
+
+/** Contenido del bloque Zernio: API key, cuentas conectadas y botones para sumar redes. */
+export function ZernioCard({
+  isActive,
+  keyHint,
+  state,
+}: {
+  isActive: boolean;
+  keyHint: string | null;
+  state: ChannelsState;
+}) {
   const router = useRouter();
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
+  const [active, setActive] = useState(isActive);
+  const [editing, setEditing] = useState(!isActive);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [active, setActive] = useState(isActive);
 
-  const status: IntegrationStatus = saving ? "saving" : active ? "connected" : "not_configured";
-
-  async function handleSave() {
-    if (!apiKey.trim() || saving) return;
+  async function handleSave(apiKey: string) {
     setSaving(true);
     setError(null);
-    setSuccessMessage(null);
-
-    const result = await saveZernioApiKey(apiKey.trim());
+    const result = await saveZernioApiKey(apiKey);
     setSaving(false);
 
     if ("error" in result) {
@@ -35,11 +48,11 @@ export function ZernioCard({ isActive }: { isActive: boolean }) {
     }
 
     setActive(true);
-    setApiKey("");
-    setSuccessMessage(`Conectado (${result.accountCount} ${result.accountCount === 1 ? "cuenta encontrada" : "cuentas encontradas"})`);
-    setTimeout(() => setSuccessMessage(null), 5000);
-    // Trae de nuevo la lista de canales del server component: las cuentas
-    // recien sincronizadas no aparecian solas en la grilla de abajo.
+    setEditing(false);
+    toast.success(
+      `Zernio conectado: ${result.accountCount} ${result.accountCount === 1 ? "cuenta encontrada" : "cuentas encontradas"}`
+    );
+    // Trae de nuevo los canales desde el server component (las cuentas recien sincronizadas).
     router.refresh();
   }
 
@@ -49,97 +62,125 @@ export function ZernioCard({ isActive }: { isActive: boolean }) {
     const result = await disconnectZernio();
     setDisconnecting(false);
     if ("error" in result) {
-      setError(result.error);
+      toast.error(result.error);
       return;
     }
     setActive(false);
+    setEditing(true);
+    toast.success("Zernio desconectado");
   }
 
+  const channels = state.zernioChannels;
+  const syncing = state.syncing === "zernio";
+
   return (
-    <div className="rounded-lg border border-border p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium">Instagram (Zernio)</p>
-          <p className="text-xs text-muted-foreground">
-            Tambien habilita Facebook y Twitter con la misma key (nota abajo)
-          </p>
-        </div>
-        <StatusBadge status={status} />
-      </div>
-
-      <p className="mt-2 text-xs text-muted-foreground">
-        Conseguí tu API key en el{" "}
-        <a
-          href="https://zernio.com/dashboard/settings/api"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-80"
-        >
-          panel de Zernio
-          <ExternalLink className="h-3 w-3" />
-        </a>
-        .
-      </p>
-
-      <div className="mt-3 relative">
-        <input
-          type={showKey ? "text" : "password"}
-          value={apiKey}
-          onChange={(e) => {
-            setApiKey(e.target.value);
-            setError(null);
-          }}
-          disabled={saving}
-          placeholder={active ? "Ingresa una key nueva para reemplazar la actual" : "Tu API key de Zernio"}
-          className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-10 text-sm font-mono placeholder:text-muted-foreground placeholder:font-sans focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+    <>
+      {active && !editing ? (
+        <SavedKeyRow
+          hint={keyHint}
+          savedLabel="Probada y guardada"
+          onChange={() => setEditing(true)}
+          onDisconnect={() => setConfirmDisconnect(true)}
+          disconnecting={disconnecting}
         />
-        <button
-          type="button"
-          onClick={() => setShowKey(!showKey)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-        >
-          {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        </button>
-      </div>
+      ) : (
+        <ApiKeyForm
+          label="API key de Zernio"
+          placeholder="Pegá tu API key acá"
+          saving={saving}
+          error={error}
+          onInput={() => setError(null)}
+          onSubmit={handleSave}
+          onCancel={active ? () => setEditing(false) : undefined}
+          help={
+            <>
+              La conseguís en el{" "}
+              <a
+                href="https://zernio.com/dashboard/settings/api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 text-primary underline underline-offset-2 hover:opacity-80"
+              >
+                panel de Zernio
+                <ExternalLink className="h-3 w-3" />
+              </a>
+              . Al pegarla la probamos sola.
+            </>
+          }
+        />
+      )}
 
-      <div className="mt-3 flex items-center gap-3">
-        <button
-          onClick={handleSave}
-          disabled={!apiKey.trim() || saving}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
-        >
-          {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          {saving ? "Probando y guardando..." : active ? "Reconectar" : "Conectar"}
-        </button>
+      {channels.length > 0 ? (
+        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+          {channels.map((c) => (
+            <ChannelRow key={c.id} channel={c} state={state} />
+          ))}
+        </div>
+      ) : (
+        active && (
+          <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
+            <p className="text-sm font-medium">Todavía no hay cuentas</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Sumá tu primera red con los botones de abajo.</p>
+          </div>
+        )
+      )}
 
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Sumar:</span>
+          {ZERNIO_PLATFORMS.map((p) => {
+            const tip = !active
+              ? "Primero conectá tu API key"
+              : EXTRA_COST_PLATFORMS.includes(p)
+                ? "Cuesta $6/mes extra en Zernio"
+                : null;
+            return (
+              <Tooltip key={p} content={tip}>
+                <button
+                  type="button"
+                  disabled={!active || state.connecting !== null}
+                  onClick={() => state.connect("zernio", p)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background py-1 pl-1 pr-3 text-xs font-medium transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted">
+                    {state.connecting === p ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <PlatformIcon platform={p} className="h-3.5 w-3.5" size={14} />
+                    )}
+                  </span>
+                  {PLATFORM_LABELS[p]}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
         {active && (
-          <button
-            onClick={() => setConfirmDisconnect(true)}
-            disabled={disconnecting}
-            className="text-xs font-medium text-muted-foreground hover:text-destructive disabled:opacity-50"
-          >
-            {disconnecting ? "Desconectando..." : "Desconectar"}
-          </button>
+          <Tooltip content="Buscar cuentas nuevas o cambios en Zernio">
+            <button
+              type="button"
+              onClick={() => state.sync("zernio")}
+              disabled={state.syncing !== null}
+              aria-label="Sincronizar Zernio"
+              className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
+              {syncing ? "Sincronizando..." : "Sincronizar"}
+            </button>
+          </Tooltip>
         )}
-
-        {successMessage && (
-          <span className="flex items-center gap-1 text-xs text-green-600">
-            <Check className="h-3.5 w-3.5" />
-            {successMessage}
-          </span>
-        )}
-        {error && <span className="text-xs text-red-600">{error}</span>}
       </div>
 
       <ConfirmDialog
         open={confirmDisconnect}
-        title="Desconectar Zernio?"
+        title="¿Desconectar Zernio?"
         message="Se borra la API key guardada. Las cuentas y conversaciones ya sincronizadas no se borran, pero no vas a poder recibir ni mandar mensajes hasta que la reconectes."
         confirmLabel="Desconectar"
+        cancelLabel="Cancelar"
         destructive
         onConfirm={handleDisconnect}
         onCancel={() => setConfirmDisconnect(false)}
       />
-    </div>
+    </>
   );
 }

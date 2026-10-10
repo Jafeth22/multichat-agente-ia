@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -12,6 +11,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Loader2, MoreVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 
 export interface ActionsMenuItem {
   label: string;
@@ -46,8 +46,12 @@ export function ActionsMenu({
 
   const close = useCallback(() => setOpen(false), []);
 
-  useLayoutEffect(() => {
-    if (!open) return;
+  /** Calcula donde abrir el panel (arriba si no entra abajo) y lo abre. */
+  function toggle() {
+    if (open) {
+      close();
+      return;
+    }
     const r = buttonRef.current?.getBoundingClientRect();
     if (!r) return;
     const estimatedHeight = items.length * 34 + 12;
@@ -57,7 +61,8 @@ export function ActionsMenu({
       right: window.innerWidth - r.right,
       up,
     });
-  }, [open, items.length]);
+    setOpen(true);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -92,23 +97,24 @@ export function ActionsMenu({
 
   return (
     <>
-      <button
-        ref={buttonRef}
-        type="button"
-        title={title}
-        aria-label={title}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        disabled={loading}
-        onClick={() => setOpen((o) => !o)}
-        className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-      >
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <MoreVertical className="h-4 w-4" />
-        )}
-      </button>
+      <Tooltip content={open ? null : title}>
+        <button
+          ref={buttonRef}
+          type="button"
+          aria-label={title}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          disabled={loading}
+          onClick={toggle}
+          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MoreVertical className="h-4 w-4" />
+          )}
+        </button>
+      </Tooltip>
 
       {open &&
         pos &&
