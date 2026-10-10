@@ -69,12 +69,17 @@ export function IntegrationsView({
       <CollapsibleSection
         icon={Plug}
         title="Canales de mensajeria"
-        description="Instagram, WhatsApp y las redes opcionales de Zernio"
+        description="Separados por proveedor: Zernio (Instagram y otras redes) y WhatsApp"
       >
-        <ZernioCard key={zernio?.updated_at ?? "zernio-empty"} isActive={zernio?.is_active ?? false} />
-        <div className="pt-2">
-          <ChannelsView channels={channels} workspaceId={workspaceId} />
-        </div>
+        <ChannelsView
+          channels={channels}
+          workspaceId={workspaceId}
+          providerExtras={{
+            zernio: (
+              <ZernioCard key={zernio?.updated_at ?? "zernio-empty"} isActive={zernio?.is_active ?? false} />
+            ),
+          }}
+        />
       </CollapsibleSection>
 
       <CollapsibleSection icon={Mail} title="Email" description="Email transaccional saliente (Resend)">

@@ -10,18 +10,6 @@ import type { Database } from "@/lib/types/database";
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
 
-/**
- * Evolution API corre en Railway pero la app se despliega en Vercel, asi
- * que ya no comparten una red privada: el webhook de Evolution llega por
- * internet publica. Para que no cualquiera pueda mandarle eventos falsos
- * a este endpoint, la URL lleva un secreto por canal (igual patron que
- * webhook_secret ya usa para Zernio) que se valida en la ruta.
- */
-function webhookUrl(secret: string): string {
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "");
-  return `${appUrl}/api/webhooks/evolution/${secret}`;
-}
-
 async function requireAdmin() {
   const ctx = await getWorkspace();
   if (!isOwnerOrAdmin(ctx.role)) {
@@ -43,7 +31,7 @@ export async function createWhatsappInstance() {
 
   try {
     const created = await evolution.createInstance(instanceName);
-    await evolution.setWebhook(instanceName, webhookUrl(webhookSecret));
+    await evolution.setWebhook(instanceName, evolution.evolutionWebhookUrl(webhookSecret));
 
     const { data: channel, error } = await supabase
       .from("channels")

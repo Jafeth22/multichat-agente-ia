@@ -303,13 +303,27 @@ async function handleMessagesUpsert(
       if (existing) continue;
     }
 
-    await supabase.from("messages").insert({
+    const { error: insertError } = await supabase.from("messages").insert({
       conversation_id: conversation.id,
       direction: fromMe ? "outbound" : "inbound",
       text: finalText,
       platform_message_id: platformMessageId,
       status: "sent",
     });
+
+    if (insertError) {
+      console.error("Failed to insert WhatsApp message:", insertError);
+      continue;
+    }
+
+    // La bandeja refresca el hilo cuando la conversacion cambia (Realtime).
+    // Los UPDATE de arriba ocurren antes de guardar el mensaje, asi que el
+    // refresco llegaba antes que el mensaje. Este toque, ya con el mensaje
+    // guardado, dispara un refresco que si lo incluye.
+    await supabase
+      .from("conversations")
+      .update({ last_message_at: new Date().toISOString() })
+      .eq("id", conversation.id);
 
     // F18: deteccion automatica de "no contactar" en mensajes entrantes.
     if (!fromMe) {

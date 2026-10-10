@@ -22,17 +22,20 @@ export default function ChannelCallbackPage() {
       }
 
       try {
-        const res = await fetch("/api/v1/channels/sync", { method: "POST" });
+        // Vuelve del OAuth de Zernio: solo hace falta sincronizar Zernio.
+        const res = await fetch("/api/v1/channels/sync?provider=zernio", { method: "POST" });
         const data = await res.json();
+        const zernio = data.results?.zernio;
+        const error = data.error || zernio?.error || zernio?.skipped;
 
-        if (!res.ok || data.error) {
+        if (!res.ok || error) {
           setStatus("error");
-          setMessage(data.error || "Failed to sync channels.");
+          setMessage(error || "Failed to sync channels.");
           setTimeout(() => router.push("/dashboard/settings/integrations"), 2000);
           return;
         }
 
-        const { created } = data.synced;
+        const { created } = zernio;
         setStatus("success");
         setMessage(
           created > 0

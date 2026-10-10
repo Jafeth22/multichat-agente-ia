@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import {
   Check,
   Copy,
@@ -18,13 +18,20 @@ import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PlatformIcon } from "@/components/platform-icon";
+import { formatDateDMY } from "@/components/ui/date-time-field";
 import type { Database } from "@/lib/types/database";
 import {
-  PLATFORMS,
   PLATFORM_LABELS,
   platformLabel,
   type Platform,
 } from "@/lib/platforms";
+import {
+  CHANNEL_PROVIDERS,
+  channelProvider,
+  type ChannelProvider,
+  type ChannelProviderInfo,
+} from "@/lib/channel-providers";
+import type { ChannelSyncResult } from "@/lib/channel-sync/types";
 import {
   createWhatsappInstance,
   refreshWhatsappQr,
@@ -34,6 +41,8 @@ import {
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
 
+/** Donde se muestra un aviso: en la seccion de un proveedor o arriba de todo. */
+type MessageSlot = ChannelProvider | "all";
 
 function getDmLink(platform: Platform, username: string | null): { url: string | null; label: string } {
   const handle = username || "";
@@ -59,15 +68,32 @@ function getDmLink(platform: Platform, username: string | null): { url: string |
   }
 }
 
+/** Texto corto para el resultado del sync de un proveedor. */
+function describeSyncResult(result: ChannelSyncResult): string {
+  if (result.error) return `No se pudo sincronizar: ${result.error}`;
+  if (result.skipped) return result.skipped;
+  if (result.failed.length > 0) return `Algunos canales fallaron: ${result.failed.join("; ")}`;
+
+  const parts = [];
+  if (result.created > 0) parts.push(`${result.created} nuevos`);
+  if (result.updated > 0) parts.push(`${result.updated} actualizados`);
+  if (result.deactivated > 0) parts.push(`${result.deactivated} desactivados`);
+  if (result.conversationsImported > 0) parts.push(`${result.conversationsImported} conversaciones importadas`);
+  return parts.length > 0 ? parts.join(", ") : "Todo al dia";
+}
+
 export function ChannelsView({
   channels: initialChannels,
+  providerExtras,
 }: {
   channels: Channel[];
   workspaceId: string;
+  /** Contenido extra al principio de la seccion de un proveedor (ej: la API key de Zernio). */
+  providerExtras?: Partial<Record<ChannelProvider, ReactNode>>;
 }) {
   const [channels, setChannels] = useState(initialChannels);
 
-  // Cuando se conecta Zernio desde la card de arriba (ZernioCard), el
+  // Cuando se conecta Zernio desde la card de su seccion (ZernioCard), el
   // padre pide un router.refresh() que vuelve a traer los canales desde
   // el server component. Sin este efecto, este estado local quedaba
   // pegado en la lista (vacia) del primer render.
@@ -75,18 +101,25 @@ export function ChannelsView({
     setChannels(initialChannels);
   }, [initialChannels]);
 
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<MessageSlot | null>(null);
+  const [messages, setMessages] = useState<Partial<Record<MessageSlot, string>>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [showPlatformPicker, setShowPlatformPicker] = useState(false);
+  const [pickerProvider, setPickerProvider] = useState<ChannelProvider | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [whatsappModalChannel, setWhatsappModalChannel] = useState<Channel | null>(null);
   const [whatsappActionError, setWhatsappActionError] = useState<string | null>(null);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  function flash(slot: MessageSlot, text: string, ms = 4000) {
+    setMessages((prev) => ({ ...prev, [slot]: text }));
+    setTimeout(() => {
+      setMessages((prev) => (prev[slot] === text ? { ...prev, [slot]: undefined } : prev));
+    }, ms);
+  }
 
   // Mientras el modal de QR esta abierto, cada 3s le pregunta directo a
   // Evolution API si ya se conecto (ademas de que el webhook interno
@@ -116,24 +149,24 @@ export function ChannelsView({
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-        setShowPlatformPicker(false);
+        setPickerProvider(null);
       }
     }
-    if (showPlatformPicker) {
+    if (pickerProvider) {
       document.addEventListener("mousedown", handleClickOutside);
       return () => document.removeEventListener("mousedown", handleClickOutside);
     }
-  }, [showPlatformPicker]);
+  }, [pickerProvider]);
 
-  async function handleConnect(platform: Platform) {
-    if (platform === "whatsapp") {
+  async function handleConnect(provider: ChannelProvider, platform: Platform) {
+    setPickerProvider(null);
+
+    if (provider === "evolution") {
       setConnecting(platform);
-      setShowPlatformPicker(false);
       const result = await createWhatsappInstance();
       setConnecting(null);
       if (result.error || !result.channel) {
-        setSyncMessage(result.error || "No se pudo crear la instancia de WhatsApp");
-        setTimeout(() => setSyncMessage(null), 4000);
+        flash(provider, result.error || "No se pudo crear la instancia de WhatsApp");
         return;
       }
       setChannels((prev) => [result.channel as Channel, ...prev]);
@@ -151,8 +184,7 @@ export function ChannelsView({
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setSyncMessage(data.error || "Failed to connect");
-        setTimeout(() => setSyncMessage(null), 4000);
+        flash(provider, data.error || "No se pudo conectar");
         return;
       }
 
@@ -160,11 +192,9 @@ export function ChannelsView({
         window.location.href = data.authUrl;
       }
     } catch {
-      setSyncMessage("Failed to start connection");
-      setTimeout(() => setSyncMessage(null), 4000);
+      flash(provider, "No se pudo iniciar la conexion");
     } finally {
       setConnecting(null);
-      setShowPlatformPicker(false);
     }
   }
 
@@ -192,8 +222,7 @@ export function ChannelsView({
     setDisconnectingId(channel.id);
     const result = await disconnectWhatsappInstance(channel.id);
     if (result.error) {
-      setSyncMessage(result.error);
-      setTimeout(() => setSyncMessage(null), 4000);
+      flash("evolution", result.error);
     } else {
       setChannels((prev) =>
         prev.map((c) =>
@@ -206,52 +235,35 @@ export function ChannelsView({
     setDisconnectingId(null);
   }
 
-  async function handleSync() {
-    setSyncing(true);
-    setSyncMessage(null);
+  /** Sin proveedor sincroniza todos; cada uno muestra su resultado en su seccion. */
+  async function handleSync(provider?: ChannelProvider) {
+    const slot: MessageSlot = provider ?? "all";
+    setSyncing(slot);
+    setMessages((prev) => ({ ...prev, [slot]: undefined }));
 
     try {
-      const res = await fetch("/api/v1/channels/sync", { method: "POST" });
+      const url = provider
+        ? `/api/v1/channels/sync?provider=${provider}`
+        : "/api/v1/channels/sync";
+      const res = await fetch(url, { method: "POST" });
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setSyncMessage(data.error || "Sync failed");
+        flash(slot, data.error || "No se pudo sincronizar", 10000);
         return;
       }
 
-      const syncedChannels: Channel[] = data.channels ?? [];
-      setChannels(syncedChannels);
-      const {
-        created,
-        updated,
-        deactivated,
-        conversationsImported = 0,
-        failed = [],
-        skipped = [],
-      } = data.synced;
-      const nothingChanged =
-        created === 0 && updated === 0 && deactivated === 0 && conversationsImported === 0;
-      if (failed.length > 0) {
-        setSyncMessage(`Could not save some channels: ${failed.join("; ")}`);
-      } else if (nothingChanged && syncedChannels.length === 0 && skipped.length > 0) {
-        setSyncMessage(
-          `Nothing to connect: ZernFlow does not support ${skipped.join(", ")}`
-        );
-      } else if (nothingChanged) {
-        setSyncMessage("All channels up to date");
-      } else {
-        const parts = [];
-        if (created > 0) parts.push(`${created} added`);
-        if (updated > 0) parts.push(`${updated} updated`);
-        if (deactivated > 0) parts.push(`${deactivated} deactivated`);
-        if (conversationsImported > 0) parts.push(`${conversationsImported} conversations imported`);
-        setSyncMessage(parts.join(", "));
+      setChannels(data.channels ?? []);
+      const results = (data.results ?? {}) as Partial<Record<ChannelProvider, ChannelSyncResult>>;
+      for (const [id, result] of Object.entries(results) as [ChannelProvider, ChannelSyncResult][]) {
+        const failed = !!result.error || result.failed.length > 0;
+        flash(id, describeSyncResult(result), failed ? 10000 : 4000);
       }
-      setTimeout(() => setSyncMessage(null), failed.length > 0 ? 10000 : 4000);
+      if (!provider) flash("all", "Sincronizacion terminada");
     } catch {
-      setSyncMessage("Failed to sync. Check your connection.");
+      flash(slot, "No se pudo sincronizar. Revisa tu conexion.");
     } finally {
-      setSyncing(false);
+      setSyncing(null);
     }
   }
 
@@ -277,6 +289,7 @@ export function ChannelsView({
   async function handleDelete() {
     if (!channelToDelete) return;
     const id = channelToDelete.id;
+    const slot = channelProvider(channelToDelete);
     setChannelToDelete(null);
     setDeletingId(id);
 
@@ -285,313 +298,357 @@ export function ChannelsView({
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setSyncMessage(data.error || "Failed to delete channel");
-        setTimeout(() => setSyncMessage(null), 4000);
+        flash(slot, data.error || "No se pudo eliminar el canal");
         return;
       }
 
       setChannels((prev) => prev.filter((c) => c.id !== id));
     } catch {
-      setSyncMessage("Failed to delete channel. Check your connection.");
-      setTimeout(() => setSyncMessage(null), 4000);
+      flash(slot, "No se pudo eliminar el canal. Revisa tu conexion.");
     } finally {
       setDeletingId(null);
       setChannelToDelete(null);
     }
   }
 
-  return (
-    <div>
-      {/* Barra de acciones */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
-          Cuentas conectadas via Zernio y WhatsApp
-        </p>
-        <div className="flex items-center gap-3">
-          {syncMessage && (
-            <span className="text-xs text-muted-foreground">
-              {syncMessage}
-            </span>
+  function renderConnectButton(provider: ChannelProviderInfo) {
+    const buttonClass =
+      "inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50";
+
+    // Una sola plataforma (ej: WhatsApp): boton directo, sin menu.
+    if (provider.platforms.length === 1) {
+      const platform = provider.platforms[0];
+      return (
+        <button
+          onClick={() => handleConnect(provider.id, platform)}
+          disabled={connecting === platform}
+          className={buttonClass}
+        >
+          {connecting === platform ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
           )}
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
-          >
-            <RefreshCw
-              className={cn("h-4 w-4", syncing && "animate-spin")}
-            />
-            {syncing ? "Syncing..." : "Sync"}
-          </button>
-          <div className="relative" ref={pickerRef}>
-            <button
-              onClick={() => setShowPlatformPicker(!showPlatformPicker)}
-              className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              <Plus className="h-4 w-4" />
-              Connect Channel
-            </button>
-            {showPlatformPicker && (
-              <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-border bg-card p-2 shadow-lg">
-                {PLATFORMS.map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => handleConnect(p)}
-                    disabled={connecting === p}
-                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
-                  >
-                    {connecting === p ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <PlatformIcon platform={p} className="h-4 w-4" size={16} />
-                    )}
-                    {PLATFORM_LABELS[p]}
-                    {(p === "facebook" || p === "twitter") && (
-                      <span className="ml-auto text-[10px] text-muted-foreground">$6/mes extra</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+          Conectar {PLATFORM_LABELS[platform]}
+        </button>
+      );
+    }
 
-      {/* Channel cards */}
-      <div className="pt-4">
-        {channels.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20">
-            <Plug className="h-10 w-10 text-muted-foreground/40" />
-            <p className="mt-3 text-sm font-medium text-muted-foreground">
-              No channels yet
-            </p>
-            <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground/70">
-              Connect a social media account to start building flows and
-              automating conversations.
-            </p>
-            <button
-              onClick={() => setShowPlatformPicker(true)}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              <Plus className="h-4 w-4" />
-              Connect Channel
-            </button>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {channels.map((channel) => {
-              const label = platformLabel(channel.platform);
-              return (
-                <div
-                  key={channel.id}
-                  className="rounded-xl border border-border bg-card p-5 transition-shadow hover:shadow-sm"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      {/* Avatar with platform badge */}
-                      <div className="relative">
-                        {channel.profile_picture ? (
-                          <>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={channel.profile_picture}
-                              alt={channel.display_name ?? channel.username ?? label}
-                              className="h-10 w-10 rounded-lg object-cover"
-                            />
-                            <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-card bg-background">
-                              <PlatformIcon
-                                platform={channel.platform}
-                                className="h-3 w-3"
-                                size={12}
-                              />
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                            <PlatformIcon
-                              platform={channel.platform}
-                              className="h-5 w-5"
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-medium">
-                          {channel.display_name ??
-                            channel.username ??
-                            label}
-                        </p>
-                        {channel.username && (
-                          <p className="text-xs text-muted-foreground">
-                            @{channel.username}
-                          </p>
-                        )}
-                        <p className="mt-0.5 text-[10px] text-muted-foreground">
-                          {label}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleToggleActive(channel)}
-                        disabled={togglingId === channel.id}
-                        className={cn(
-                          "rounded-lg p-2 transition-colors",
-                          channel.is_active
-                            ? "text-green-600 hover:bg-green-100"
-                            : "text-muted-foreground hover:bg-muted"
-                        )}
-                        title={
-                          channel.is_active
-                            ? "Channel is active. Click to deactivate."
-                            : "Channel is inactive. Click to activate."
-                        }
-                      >
-                        {channel.is_active ? (
-                          <Power className="h-4 w-4" />
-                        ) : (
-                          <PowerOff className="h-4 w-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => setChannelToDelete(channel)}
-                        disabled={deletingId === channel.id}
-                        className="rounded-lg p-2 text-muted-foreground hover:bg-red-100 hover:text-red-600 transition-colors"
-                        title="Delete channel"
-                      >
-                        {deletingId === channel.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-center gap-2">
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                        channel.is_active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-muted text-muted-foreground"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "h-1.5 w-1.5 rounded-full",
-                          channel.is_active
-                            ? "bg-green-500"
-                            : "bg-muted-foreground"
-                        )}
-                      />
-                      {channel.is_active ? "Active" : "Inactive"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      Connected{" "}
-                      {new Date(channel.created_at).toLocaleDateString([], {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  </div>
-
-                  {channel.platform === "whatsapp" && (
-                    <div className="mt-3 flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
-                          channel.connection_status === "connected"
-                            ? "bg-green-100 text-green-700"
-                            : channel.connection_status === "connecting"
-                            ? "bg-yellow-100 text-yellow-700"
-                            : channel.connection_status === "error"
-                            ? "bg-red-100 text-red-700"
-                            : "bg-muted text-muted-foreground"
-                        )}
-                      >
-                        {channel.connection_status === "connected"
-                          ? "Conectado"
-                          : channel.connection_status === "connecting"
-                          ? "Esperando QR"
-                          : channel.connection_status === "error"
-                          ? "Error"
-                          : "Desconectado"}
-                      </span>
-                      {channel.connection_status === "connected" ? (
-                        <button
-                          onClick={() => handleDisconnectWhatsapp(channel)}
-                          disabled={disconnectingId === channel.id}
-                          className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
-                        >
-                          {disconnectingId === channel.id ? "Desconectando..." : "Desconectar"}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleReconnectWhatsapp(channel)}
-                          className="text-[11px] font-medium text-primary hover:underline"
-                        >
-                          {channel.connection_status === "connecting" ? "Ver QR" : "Reconectar"}
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {(() => {
-                    const dm = getDmLink(channel.platform as Platform, channel.username);
-                    if (!dm.url) return null;
-                    return (
-                      <div className="mt-3 flex items-center gap-1.5">
-                        <a
-                          href={dm.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="min-w-0 flex-1 truncate rounded-md bg-muted px-2.5 py-1 text-[11px] font-mono text-primary hover:underline"
-                          title={dm.url}
-                        >
-                          {dm.label}
-                        </a>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(dm.url!);
-                            setCopiedId(channel.id);
-                            setTimeout(() => setCopiedId(null), 2000);
-                          }}
-                          className={cn(
-                            "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors",
-                            copiedId === channel.id
-                              ? "border-green-200 bg-green-50 text-green-600"
-                              : "border-border bg-card text-muted-foreground/60 hover:bg-muted hover:text-muted-foreground"
-                          )}
-                          title={copiedId === channel.id ? "Copied!" : "Copy DM link"}
-                        >
-                          {copiedId === channel.id ? (
-                            <Check className="h-3 w-3" />
-                          ) : (
-                            <Copy className="h-3 w-3" />
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })()}
-                </div>
-              );
-            })}
+    return (
+      <div className="relative" ref={pickerProvider === provider.id ? pickerRef : undefined}>
+        <button
+          onClick={() => setPickerProvider(pickerProvider === provider.id ? null : provider.id)}
+          className={buttonClass}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Conectar canal
+        </button>
+        {pickerProvider === provider.id && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-56 rounded-xl border border-border bg-card p-2 shadow-lg">
+            {provider.platforms.map((p) => (
+              <button
+                key={p}
+                onClick={() => handleConnect(provider.id, p)}
+                disabled={connecting === p}
+                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 transition-colors"
+              >
+                {connecting === p ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PlatformIcon platform={p} className="h-4 w-4" size={16} />
+                )}
+                {PLATFORM_LABELS[p]}
+                {(p === "facebook" || p === "twitter") && (
+                  <span className="ml-auto text-[10px] text-muted-foreground">$6/mes extra</span>
+                )}
+              </button>
+            ))}
           </div>
         )}
       </div>
+    );
+  }
+
+  function renderChannelCard(channel: Channel) {
+    const label = platformLabel(channel.platform);
+    return (
+      <div
+        key={channel.id}
+        className="rounded-xl border border-border bg-card p-5 transition-shadow hover:shadow-sm"
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-3">
+            {/* Avatar with platform badge */}
+            <div className="relative">
+              {channel.profile_picture ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={channel.profile_picture}
+                    alt={channel.display_name ?? channel.username ?? label}
+                    className="h-10 w-10 rounded-lg object-cover"
+                  />
+                  <div className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-card bg-background">
+                    <PlatformIcon
+                      platform={channel.platform}
+                      className="h-3 w-3"
+                      size={12}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                  <PlatformIcon
+                    platform={channel.platform}
+                    className="h-5 w-5"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-sm font-medium">
+                {channel.display_name ??
+                  channel.username ??
+                  label}
+              </p>
+              {channel.username && (
+                <p className="text-xs text-muted-foreground">
+                  @{channel.username}
+                </p>
+              )}
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {label}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handleToggleActive(channel)}
+              disabled={togglingId === channel.id}
+              className={cn(
+                "rounded-lg p-2 transition-colors",
+                channel.is_active
+                  ? "text-green-600 hover:bg-green-100"
+                  : "text-muted-foreground hover:bg-muted"
+              )}
+              title={
+                channel.is_active
+                  ? "Canal activo. Click para desactivarlo."
+                  : "Canal inactivo. Click para activarlo."
+              }
+            >
+              {channel.is_active ? (
+                <Power className="h-4 w-4" />
+              ) : (
+                <PowerOff className="h-4 w-4" />
+              )}
+            </button>
+            <button
+              onClick={() => setChannelToDelete(channel)}
+              disabled={deletingId === channel.id}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-red-100 hover:text-red-600 transition-colors"
+              title="Eliminar canal"
+            >
+              {deletingId === channel.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+              channel.is_active
+                ? "bg-green-100 text-green-700"
+                : "bg-muted text-muted-foreground"
+            )}
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                channel.is_active
+                  ? "bg-green-500"
+                  : "bg-muted-foreground"
+              )}
+            />
+            {channel.is_active ? "Activo" : "Inactivo"}
+          </span>
+          <span className="text-[10px] text-muted-foreground">
+            Conectado el {formatDateDMY(new Date(channel.created_at))}
+          </span>
+        </div>
+
+        {channel.platform === "whatsapp" && channel.evolution_instance_name && (
+          <div className="mt-3 flex items-center gap-2">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium",
+                channel.connection_status === "connected"
+                  ? "bg-green-100 text-green-700"
+                  : channel.connection_status === "connecting"
+                  ? "bg-yellow-100 text-yellow-700"
+                  : channel.connection_status === "error"
+                  ? "bg-red-100 text-red-700"
+                  : "bg-muted text-muted-foreground"
+              )}
+            >
+              {channel.connection_status === "connected"
+                ? "Conectado"
+                : channel.connection_status === "connecting"
+                ? "Esperando QR"
+                : channel.connection_status === "error"
+                ? "Error"
+                : "Desconectado"}
+            </span>
+            {channel.connection_status === "connected" ? (
+              <button
+                onClick={() => handleDisconnectWhatsapp(channel)}
+                disabled={disconnectingId === channel.id}
+                className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
+              >
+                {disconnectingId === channel.id ? "Desconectando..." : "Desconectar"}
+              </button>
+            ) : (
+              <button
+                onClick={() => handleReconnectWhatsapp(channel)}
+                className="text-[11px] font-medium text-primary hover:underline"
+              >
+                {channel.connection_status === "connecting" ? "Ver QR" : "Reconectar"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {(() => {
+          const dm = getDmLink(channel.platform as Platform, channel.username);
+          if (!dm.url) return null;
+          return (
+            <div className="mt-3 flex items-center gap-1.5">
+              <a
+                href={dm.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-w-0 flex-1 truncate rounded-md bg-muted px-2.5 py-1 text-[11px] font-mono text-primary hover:underline"
+                title={dm.url}
+              >
+                {dm.label}
+              </a>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(dm.url!);
+                  setCopiedId(channel.id);
+                  setTimeout(() => setCopiedId(null), 2000);
+                }}
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+                  copiedId === channel.id
+                    ? "border-green-200 bg-green-50 text-green-600"
+                    : "border-border bg-card text-muted-foreground/60 hover:bg-muted hover:text-muted-foreground"
+                )}
+                title={copiedId === channel.id ? "Copiado" : "Copiar link de mensaje directo"}
+              >
+                {copiedId === channel.id ? (
+                  <Check className="h-3 w-3" />
+                ) : (
+                  <Copy className="h-3 w-3" />
+                )}
+              </button>
+            </div>
+          );
+        })()}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Sync general */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Cada proveedor se sincroniza por separado
+        </p>
+        <div className="flex items-center gap-3">
+          {messages.all && (
+            <span className="text-xs text-muted-foreground">{messages.all}</span>
+          )}
+          <button
+            onClick={() => handleSync()}
+            disabled={syncing !== null}
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          >
+            <RefreshCw className={cn("h-4 w-4", syncing === "all" && "animate-spin")} />
+            {syncing === "all" ? "Sincronizando..." : "Sincronizar todo"}
+          </button>
+        </div>
+      </div>
+
+      {CHANNEL_PROVIDERS.map((provider) => {
+        const providerChannels = channels.filter((c) => channelProvider(c) === provider.id);
+        const isSyncing = syncing === provider.id || syncing === "all";
+        return (
+          <section key={provider.id} className="rounded-xl border border-border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">{provider.title}</h3>
+                <p className="text-xs text-muted-foreground">{provider.description}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleSync(provider.id)}
+                  disabled={syncing !== null}
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("h-3.5 w-3.5", isSyncing && "animate-spin")} />
+                  {isSyncing ? "Sincronizando..." : "Sincronizar"}
+                </button>
+                {renderConnectButton(provider)}
+              </div>
+            </div>
+
+            {messages[provider.id] && (
+              <p className="mt-2 text-xs text-muted-foreground">{messages[provider.id]}</p>
+            )}
+
+            {providerExtras?.[provider.id] && (
+              <div className="mt-4">{providerExtras[provider.id]}</div>
+            )}
+
+            <div className="pt-4">
+              {providerChannels.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8">
+                  <Plug className="h-8 w-8 text-muted-foreground/40" />
+                  <p className="mt-2 text-sm font-medium text-muted-foreground">
+                    Todavia no hay canales de {provider.title}
+                  </p>
+                  <p className="mt-1 max-w-xs text-center text-xs text-muted-foreground/70">
+                    Conecta una cuenta para empezar a recibir mensajes en la bandeja.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {providerChannels.map(renderChannelCard)}
+                </div>
+              )}
+            </div>
+          </section>
+        );
+      })}
 
       <ConfirmDialog
         open={!!channelToDelete}
-        title="Delete channel?"
-        message={`This disconnects ${
+        title="Eliminar canal?"
+        message={`Esto desconecta ${
           channelToDelete?.display_name ??
           channelToDelete?.username ??
-          (channelToDelete ? platformLabel(channelToDelete.platform) : "this channel")
-        } from Zernio and permanently deletes its conversations, contact links, and stats in Zernflow. This cannot be undone.`}
-        confirmLabel="Delete"
+          (channelToDelete ? platformLabel(channelToDelete.platform) : "este canal")
+        } y borra para siempre sus conversaciones, vinculos con contactos y estadisticas. No se puede deshacer.`}
+        confirmLabel="Eliminar"
         destructive
         onConfirm={handleDelete}
         onCancel={() => setChannelToDelete(null)}

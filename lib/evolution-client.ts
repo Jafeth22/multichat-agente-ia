@@ -52,6 +52,18 @@ async function request<T>(
   return data as T;
 }
 
+/**
+ * URL publica a la que Evolution manda los eventos de una instancia.
+ * Evolution API corre en Railway y la app en otro host, asi que no comparten
+ * una red privada: el webhook llega por internet publica. Para que no
+ * cualquiera pueda mandarle eventos falsos, la URL lleva un secreto por
+ * canal (channels.webhook_secret) que se valida en la ruta.
+ */
+export function evolutionWebhookUrl(secret: string): string {
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "");
+  return `${appUrl}/api/webhooks/evolution/${secret}`;
+}
+
 export interface EvolutionCreateInstanceResult {
   instance?: { instanceName?: string; instanceId?: string };
   qrcode?: { base64?: string };

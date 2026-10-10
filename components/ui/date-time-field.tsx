@@ -19,7 +19,7 @@ function toDateKey(d: Date): string {
 }
 
 /** Formato unico de fecha del sistema: dd/mm/yyyy. */
-function formatDateDMY(d: Date): string {
+export function formatDateDMY(d: Date): string {
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
