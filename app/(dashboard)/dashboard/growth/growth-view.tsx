@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { Database, Json } from "@/lib/types/database";
 import { PLATFORM_LABELS } from "@/lib/platforms";
 import { SelectField } from "@/components/ui/select-field";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type Channel = Database["public"]["Tables"]["channels"]["Row"];
 type CommentLog = Database["public"]["Tables"]["comment_logs"]["Row"];
@@ -649,40 +650,44 @@ export function GrowthView({
 
                       {/* Actions */}
                       <div className="ml-4 flex items-center gap-1">
-                        <button
-                          onClick={() => handleStartEdit(trigger)}
-                          className="rounded-lg p-2 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
-                          title="Edit rule"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleToggle(trigger)}
-                          disabled={togglingId === trigger.id}
-                          className={cn(
-                            "rounded-lg p-2 transition-colors",
-                            trigger.is_active
-                              ? "text-green-600 hover:bg-green-50"
-                              : "text-muted-foreground/60 hover:bg-muted"
-                          )}
-                          title={
-                            trigger.is_active ? "Pause rule" : "Activate rule"
-                          }
-                        >
-                          {trigger.is_active ? (
-                            <Power className="h-4 w-4" />
-                          ) : (
-                            <PowerOff className="h-4 w-4" />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => handleDelete(trigger.id)}
-                          disabled={deletingId === trigger.id}
-                          className="rounded-lg p-2 text-muted-foreground/60 transition-colors hover:bg-red-50 hover:text-red-600"
-                          title="Delete rule"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <Tooltip content="Edit rule">
+                          <button
+                            onClick={() => handleStartEdit(trigger)}
+                            className="rounded-lg p-2 text-muted-foreground/60 transition-colors hover:bg-muted hover:text-foreground"
+                            aria-label="Edit rule"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                        </Tooltip>
+                        <Tooltip content={trigger.is_active ? "Pause rule" : "Activate rule"}>
+                          <button
+                            onClick={() => handleToggle(trigger)}
+                            disabled={togglingId === trigger.id}
+                            className={cn(
+                              "rounded-lg p-2 transition-colors",
+                              trigger.is_active
+                                ? "text-green-600 hover:bg-green-50"
+                                : "text-muted-foreground/60 hover:bg-muted"
+                            )}
+                            aria-label={trigger.is_active ? "Pause rule" : "Activate rule"}
+                          >
+                            {trigger.is_active ? (
+                              <Power className="h-4 w-4" />
+                            ) : (
+                              <PowerOff className="h-4 w-4" />
+                            )}
+                          </button>
+                        </Tooltip>
+                        <Tooltip content="Delete rule">
+                          <button
+                            onClick={() => handleDelete(trigger.id)}
+                            disabled={deletingId === trigger.id}
+                            className="rounded-lg p-2 text-muted-foreground/60 transition-colors hover:bg-red-50 hover:text-red-600"
+                            aria-label="Delete rule"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </Tooltip>
                       </div>
                     </div>
                   </div>
@@ -759,12 +764,13 @@ export function GrowthView({
                             Sent
                           </span>
                         ) : log.error ? (
-                          <span
-                            className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700"
-                            title={log.error}
-                          >
-                            Error
-                          </span>
+                          <Tooltip content={log.error}>
+                            <span
+                              className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700"
+                            >
+                              Error
+                            </span>
+                          </Tooltip>
                         ) : (
                           <span className="text-xs text-muted-foreground/60">
                             --

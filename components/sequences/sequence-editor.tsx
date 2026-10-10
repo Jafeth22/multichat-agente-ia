@@ -17,6 +17,7 @@ import { updateSequence, deleteSequence } from "@/lib/actions/sequences";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { SequenceStep } from "@/lib/types/database";
 import { SelectField } from "@/components/ui/select-field";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface SequenceEditorProps {
   sequence: {
@@ -185,14 +186,16 @@ export function SequenceEditor({ sequence }: SequenceEditorProps) {
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {saving ? "Saving..." : "Save"}
             </button>
-            <button
-              onClick={() => setConfirmDelete(true)}
-              disabled={deleting}
-              className="rounded-lg p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-              title="Delete sequence"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
+            <Tooltip content="Delete sequence">
+              <button
+                onClick={() => setConfirmDelete(true)}
+                disabled={deleting}
+                className="rounded-lg p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                aria-label="Delete sequence"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </Tooltip>
             <ConfirmDialog
               open={confirmDelete}
               title="Delete sequence"

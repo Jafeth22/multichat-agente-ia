@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 
 const MONTH_NAMES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -215,15 +216,17 @@ export function TimeField({
           maxLength={5}
           className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
         />
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => setOpen((o) => !o)}
-          className="shrink-0 rounded-lg border border-input bg-background p-2 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-          title="Elegir hora"
-        >
-          <Clock className="h-4 w-4" />
-        </button>
+        <Tooltip content="Elegir hora" className="shrink-0">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setOpen((o) => !o)}
+            className="shrink-0 rounded-lg border border-input bg-background p-2 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+            aria-label="Elegir hora"
+          >
+            <Clock className="h-4 w-4" />
+          </button>
+        </Tooltip>
       </div>
 
       {open && !disabled && (

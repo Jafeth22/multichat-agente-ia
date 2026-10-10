@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { Tooltip } from "@/components/ui/tooltip";
 
 // --- Template types ---
 
@@ -330,14 +331,15 @@ export function TemplatesView({ workspaceId }: { workspaceId: string }) {
               Start with a pre-built flow and customize it to your needs
             </p>
           </div>
-          <button
-            disabled
-            className="inline-flex items-center gap-2 rounded-lg border border-dashed border-border px-4 py-2 text-sm font-medium text-muted-foreground cursor-not-allowed opacity-60"
-            title="Coming soon"
-          >
-            <BookmarkPlus className="h-4 w-4" />
-            Save Current Flow as Template
-          </button>
+          <Tooltip content="Coming soon">
+            <button
+              disabled
+              className="inline-flex items-center gap-2 rounded-lg border border-dashed border-border px-4 py-2 text-sm font-medium text-muted-foreground pointer-events-none opacity-60"
+            >
+              <BookmarkPlus className="h-4 w-4" />
+              Save Current Flow as Template
+            </button>
+          </Tooltip>
         </div>
       </div>
 

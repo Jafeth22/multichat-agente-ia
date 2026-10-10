@@ -11,6 +11,7 @@ import { ConditionPanel } from "./ConditionPanel";
 import { DelayPanel } from "./DelayPanel";
 import { ActionPanel } from "./ActionPanel";
 import { AiResponsePanel } from "./AiResponsePanel";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface NodeConfigSidebarProps {
   node: Node;
@@ -194,14 +195,16 @@ export function NodeConfigSidebar({ node, nodes, edges, onChange, onClose, onDel
           </div>
         </div>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onDelete(node.id)}
-            className="rounded-lg p-1.5 text-muted-foreground/60 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500"
-            title="Delete node"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
+          <Tooltip content="Delete node">
+            <button
+              type="button"
+              onClick={() => onDelete(node.id)}
+              className="rounded-lg p-1.5 text-muted-foreground/60 hover:bg-red-50 dark:hover:bg-red-950 hover:text-red-500"
+              aria-label="Delete node"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </Tooltip>
           <button
             type="button"
             onClick={onClose}

@@ -35,6 +35,7 @@ import { AiResponseNode } from "./nodes/AiResponseNode";
 import { NodeConfigSidebar } from "./panels/NodeConfigSidebar";
 import { VersionHistoryPanel } from "./panels/VersionHistoryPanel";
 import { TestPanel } from "./panels/TestPanel";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type Flow = Database["public"]["Tables"]["flows"]["Row"];
 
@@ -410,18 +411,20 @@ function FlowCanvasInner({ flow }: FlowCanvasProps) {
             )}
             Publish
           </button>
-          <button
-            onClick={() => setConfirmDelete(true)}
-            disabled={deleting}
-            className="rounded-lg p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-            title="Delete flow"
-          >
-            {deleting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-          </button>
+          <Tooltip content="Delete flow">
+            <button
+              onClick={() => setConfirmDelete(true)}
+              disabled={deleting}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+              aria-label="Delete flow"
+            >
+              {deleting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+            </button>
+          </Tooltip>
           <ConfirmDialog
             open={confirmDelete}
             title="Delete flow"

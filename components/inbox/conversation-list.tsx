@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { PlatformIcon } from "@/components/platform-icon";
 import type { Database, Platform, ConversationStatus } from "@/lib/types/database";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type Conversation = Database["public"]["Tables"]["conversations"]["Row"] & {
   contacts: Database["public"]["Tables"]["contacts"]["Row"] | null;
@@ -198,12 +199,13 @@ export function ConversationList({
                   <p className="flex min-w-0 items-center gap-1 truncate text-sm font-medium">
                     <span className="truncate">{conversation.contacts?.display_name ?? "Unknown"}</span>
                     {conversation.contacts?.do_not_contact && (
-                      <span
-                        title="No contactar"
-                        className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
-                      >
-                        <Ban className="h-2.5 w-2.5" />
-                      </span>
+                      <Tooltip content="No contactar" className="shrink-0">
+                        <span
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+                        >
+                          <Ban className="h-2.5 w-2.5" />
+                        </span>
+                      </Tooltip>
                     )}
                   </p>
                   <span

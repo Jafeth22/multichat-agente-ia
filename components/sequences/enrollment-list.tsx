@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Users, XCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cancelEnrollment } from "@/lib/actions/sequences";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface Enrollment {
   id: string;
@@ -110,18 +111,20 @@ export function EnrollmentList({
                     {status.label}
                   </span>
                   {enrollment.status === "active" && (
-                    <button
-                      onClick={() => handleCancel(enrollment.id)}
-                      disabled={isCancelling}
-                      className="rounded-lg p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400 disabled:opacity-50"
-                      title="Cancel enrollment"
-                    >
-                      {isCancelling ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <XCircle className="h-3.5 w-3.5" />
-                      )}
-                    </button>
+                    <Tooltip content="Cancel enrollment">
+                      <button
+                        onClick={() => handleCancel(enrollment.id)}
+                        disabled={isCancelling}
+                        className="rounded-lg p-1.5 text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400 disabled:opacity-50"
+                        aria-label="Cancel enrollment"
+                      >
+                        {isCancelling ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </Tooltip>
                   )}
                 </div>
               );

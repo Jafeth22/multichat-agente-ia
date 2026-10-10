@@ -25,6 +25,7 @@ import {
 import Link from "next/link";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SelectField } from "@/components/ui/select-field";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface MemberDetail {
   userId: string;
@@ -252,20 +253,22 @@ export function TeamView({
                     </span>
 
                     {isOwner && member.userId !== currentUserId && (
-                      <button
-                        onClick={() =>
-                          setConfirmRemove({ userId: member.userId, name: member.name })
-                        }
-                        disabled={removingId === member.userId}
-                        className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                        title="Remove member"
-                      >
-                        {removingId === member.userId ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                      </button>
+                      <Tooltip content="Remove member">
+                        <button
+                          onClick={() =>
+                            setConfirmRemove({ userId: member.userId, name: member.name })
+                          }
+                          disabled={removingId === member.userId}
+                          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                          aria-label="Remove member"
+                        >
+                          {removingId === member.userId ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      </Tooltip>
                     )}
                   </div>
                 </div>
@@ -398,18 +401,20 @@ export function TeamView({
                         </div>
 
                         {isOwnerOrAdmin && (
-                          <button
-                            onClick={() => setConfirmRevoke(invite.id)}
-                            disabled={revokingId === invite.id}
-                            className="shrink-0 ml-4 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                            title="Revoke invite"
-                          >
-                            {revokingId === invite.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            ) : (
-                              <X className="h-3.5 w-3.5" />
-                            )}
-                          </button>
+                          <Tooltip content="Revoke invite" className="shrink-0">
+                            <button
+                              onClick={() => setConfirmRevoke(invite.id)}
+                              disabled={revokingId === invite.id}
+                              className="shrink-0 ml-4 rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                              aria-label="Revoke invite"
+                            >
+                              {revokingId === invite.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <X className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </Tooltip>
                         )}
                       </div>
                     );

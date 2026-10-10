@@ -7,6 +7,7 @@ import { createTemplate, updateTemplate, softDeleteTemplate } from "@/lib/action
 import { interpolateTemplate } from "@/lib/templates";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import type { Database } from "@/lib/types/database";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type Template = Database["public"]["Tables"]["response_templates"]["Row"];
 
@@ -269,15 +270,15 @@ function TemplateFormModal({
               </p>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {INSERTABLE_VARIABLES.map((v) => (
-                  <button
-                    key={v.token}
-                    type="button"
-                    onClick={() => insertVariable(v.token)}
-                    className="rounded-full border border-dashed border-border bg-muted/50 px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-primary"
-                    title={`Insertar ${v.label}`}
-                  >
-                    {v.token}
-                  </button>
+                  <Tooltip key={v.token} content={`Insertar ${v.label}`}>
+                    <button
+                      type="button"
+                      onClick={() => insertVariable(v.token)}
+                      className="rounded-full border border-dashed border-border bg-muted/50 px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-primary"
+                    >
+                      {v.token}
+                    </button>
+                  </Tooltip>
                 ))}
               </div>
             </div>

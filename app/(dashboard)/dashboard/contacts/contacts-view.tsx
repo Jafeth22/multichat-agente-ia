@@ -27,6 +27,7 @@ import { SelectField } from "@/components/ui/select-field";
 import { ActionsMenu } from "@/components/ui/actions-menu";
 import type { Database, LeadTemperature } from "@/lib/types/database";
 import type { WorkspaceMemberOption } from "@/lib/members";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type Tag = Database["public"]["Tables"]["tags"]["Row"];
 type ContactWithTags = Database["public"]["Tables"]["contacts"]["Row"] & {
@@ -344,12 +345,13 @@ export function ContactsView({
                         <span className="flex items-center gap-1.5 text-sm font-medium hover:underline">
                           {contact.display_name ?? "Sin nombre"}
                           {contact.do_not_contact && (
-                            <span
-                              title="No contactar"
-                              className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
-                            >
-                              <Ban className="h-2.5 w-2.5" />
-                            </span>
+                            <Tooltip content="No contactar">
+                              <span
+                                className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+                              >
+                                <Ban className="h-2.5 w-2.5" />
+                              </span>
+                            </Tooltip>
                           )}
                         </span>
                       </Link>

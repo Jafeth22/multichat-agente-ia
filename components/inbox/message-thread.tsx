@@ -13,6 +13,7 @@ import { TemplatePicker } from "@/components/inbox/template-picker";
 import { MessageAttachments } from "@/components/inbox/message-attachments";
 import { softDeleteConversation, restoreConversation } from "@/lib/actions/conversations";
 import type { Database, ConversationStatus } from "@/lib/types/database";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type ResponseTemplate = Database["public"]["Tables"]["response_templates"]["Row"];
 
@@ -440,13 +441,14 @@ export function MessageThread({
             <p className="flex items-center gap-1.5 text-sm font-medium">
               {conversation.contacts?.display_name ?? "Unknown"}
               {conversation.contacts?.do_not_contact && (
-                <span
-                  title="No contactar"
-                  className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
-                >
-                  <Ban className="h-2.5 w-2.5" />
-                  No contactar
-                </span>
+                <Tooltip content="No contactar">
+                  <span
+                    className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700"
+                  >
+                    <Ban className="h-2.5 w-2.5" />
+                    No contactar
+                  </span>
+                </Tooltip>
               )}
             </p>
           </div>
@@ -472,47 +474,51 @@ export function MessageThread({
           )}
           <div className="flex items-center gap-1">
             {conversation.status !== "closed" && (
-              <button
-                onClick={() => updateConversationStatus("closed")}
-                disabled={!!statusUpdating}
-                title="Close conversation"
-                aria-label="Close conversation"
-                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                {statusUpdating === "closed" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
-              </button>
+              <Tooltip content="Close conversation">
+                <button
+                  onClick={() => updateConversationStatus("closed")}
+                  disabled={!!statusUpdating}
+                  aria-label="Close conversation"
+                  className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {statusUpdating === "closed" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
+                </button>
+              </Tooltip>
             )}
             {conversation.status !== "snoozed" && (
-              <button
-                onClick={() => updateConversationStatus("snoozed")}
-                disabled={!!statusUpdating}
-                title="Snooze conversation"
-                aria-label="Snooze conversation"
-                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                {statusUpdating === "snoozed" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clock className="h-3.5 w-3.5" />}
-              </button>
+              <Tooltip content="Snooze conversation">
+                <button
+                  onClick={() => updateConversationStatus("snoozed")}
+                  disabled={!!statusUpdating}
+                  aria-label="Snooze conversation"
+                  className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {statusUpdating === "snoozed" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clock className="h-3.5 w-3.5" />}
+                </button>
+              </Tooltip>
             )}
             {conversation.status !== "open" && (
-              <button
-                onClick={() => updateConversationStatus("open")}
-                disabled={!!statusUpdating}
-                title="Reopen conversation"
-                aria-label="Reopen conversation"
-                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
-              >
-                {statusUpdating === "open" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-              </button>
+              <Tooltip content="Reopen conversation">
+                <button
+                  onClick={() => updateConversationStatus("open")}
+                  disabled={!!statusUpdating}
+                  aria-label="Reopen conversation"
+                  className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {statusUpdating === "open" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+                </button>
+              </Tooltip>
             )}
-            <button
-              onClick={() => setConfirmDeleteConversation(true)}
-              disabled={deletingConversation}
-              title="Eliminar conversacion"
-              aria-label="Eliminar conversacion"
-              className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-            >
-              {deletingConversation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-            </button>
+            <Tooltip content="Eliminar conversacion">
+              <button
+                onClick={() => setConfirmDeleteConversation(true)}
+                disabled={deletingConversation}
+                aria-label="Eliminar conversacion"
+                className="rounded-md p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+              >
+                {deletingConversation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              </button>
+            </Tooltip>
           </div>
         </div>
       </div>
